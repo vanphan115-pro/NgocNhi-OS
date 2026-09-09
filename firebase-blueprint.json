@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "SystemModule": {
+      "title": "SystemModule",
+      "description": "Dữ liệu phân hệ lưu trữ trong hệ thống Dịch Vụ Ngọc Nhi",
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "description": "Danh sách các bản ghi của phân hệ"
+        },
+        "registry": {
+          "type": "object",
+          "description": "Bảng đăng ký vị trí vật lý QR"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Thời điểm cập nhật bản ghi"
+        },
+        "version": {
+          "type": "string",
+          "description": "Phiên bản schema dữ liệu"
+        }
+      },
+      "required": ["updatedAt"]
+    },
+    "SystemMeta": {
+      "title": "SystemMeta",
+      "description": "Thông tin trạng thái khởi tạo cơ sở dữ liệu hệ thống",
+      "type": "object",
+      "properties": {
+        "initialized": {
+          "type": "boolean",
+          "description": "Trạng thái đã khởi tạo online"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Thời điểm khởi tạo"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Thời điểm cập nhật"
+        },
+        "version": {
+          "type": "string",
+          "description": "Phiên bản hệ thống"
+        }
+      },
+      "required": ["initialized", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/nn_modules/{moduleId}": {
+      "schema": "SystemModule",
+      "description": "Lưu trữ dữ liệu độc lập từng phân hệ (trang trại, quán ăn, tiệc cưới, điều hành) để tránh giới hạn kích thước và xung đột ghi"
+    }
+  }
+}

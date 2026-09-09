@@ -1,0 +1,6 @@
+{
+  "name": "Hệ Thống Dịch Vụ Ngọc Nhi",
+  "description": "Hệ thống dịch vụ Ngọc Nhi gồm Trang Trại Dúi KaKa (5 Phân Khu), Quán Ăn Đặc Sản Ngọc Nhi, Dịch Vụ Tiệc Cưới Trọn Gói và Trung Tâm Điều Hành Thống Nhất.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

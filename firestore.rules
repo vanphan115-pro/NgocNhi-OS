@@ -1,0 +1,59 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Mặc định chặn toàn bộ truy cập không được cấp phép
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper kiểm tra người dùng đã xác thực Firebase Auth
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // 2. Helper functions kiểm tra định danh module hợp lệ
+    function isValidModuleId(moduleId) {
+      return moduleId in [
+        'system_meta',
+        'restaurant_menu',
+        'table_bookings',
+        'wedding_inquiries',
+        'restaurant_orders',
+        'dui_orders',
+        'external_finance',
+        'admin_notifications',
+        'farm_areas',
+        'farm_rows',
+        'farm_cages',
+        'farm_disinfection',
+        'farm_tasks',
+        'physical_registry'
+      ];
+    }
+
+    // 3. Helper kiểm tra cấu trúc dữ liệu hợp lệ khi ghi
+    function isValidPayload() {
+      return request.resource.data.updatedAt is string
+        && request.resource.data.updatedAt.size() >= 10
+        && request.resource.data.updatedAt.size() <= 64;
+    }
+
+    // 4. Quy tắc cho các phân hệ dữ liệu độc lập (nn_modules)
+    match /nn_modules/{moduleId} {
+      // Bắt buộc xác thực request.auth != null và đúng ID module
+      allow read: if isAuthenticated() && isValidModuleId(moduleId);
+      
+      // Cho phép tạo hoặc cập nhật nếu đã xác thực, đúng ID module và payload có updatedAt hợp lệ
+      allow create, update: if isAuthenticated() && isValidModuleId(moduleId) && isValidPayload();
+
+      // Tuyệt đối không cho phép xóa document phân hệ
+      allow delete: if false;
+    }
+
+    // 5. Cho phép đọc dữ liệu cũ để phục vụ migration dữ liệu nếu cần
+    match /nn_system_data/{docId} {
+      allow read: if isAuthenticated() && docId == 'main_store';
+      allow write: if false;
+    }
+  }
+}
