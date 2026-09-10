@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { FarmCage, CageStatus, FarmArea } from './farmTypes';
+import { normalizeFarmCage } from './farmData';
 import { 
   FarmStatusBusinessForm, 
   BusinessFormData, 
@@ -228,7 +229,7 @@ export const EditCageModal: React.FC<EditCageModalProps> = ({
           oldStatus: cage.status,
           newStatus: formData.status
         },
-        ...cage.history
+        ...(cage.history || [])
       ]
     };
 
@@ -250,7 +251,7 @@ export const EditCageModal: React.FC<EditCageModalProps> = ({
 
       if (targetCage && targetCage.id !== cage.id) {
         const currentCount = targetCage.status === 'trong' ? 0 : (targetCage.ratCount || 0);
-        updatedBabyCage = {
+        updatedBabyCage = normalizeFarmCage({
           ...targetCage,
           status: 'dang_nuoi_baby',
           statusLabel: 'Đang nuôi Baby',
@@ -269,14 +270,14 @@ export const EditCageModal: React.FC<EditCageModalProps> = ({
               relatedCageCode: cage.code,
               actor: 'Phan Dũng'
             },
-            ...targetCage.history
+            ...(targetCage.history || [])
           ]
-        };
+        });
         updatedCage.targetBabyCageCode = targetCage.code;
       }
     }
 
-    onSave(updatedCage, updatedBabyCage);
+    onSave(normalizeFarmCage(updatedCage), updatedBabyCage);
   };
 
   return (

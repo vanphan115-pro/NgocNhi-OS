@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { UserRole } from '../../types';
 import { 
   FarmCage, 
@@ -10,7 +10,8 @@ import {
 } from './farmTypes';
 import { 
   formatDateVN, 
-  addDays 
+  addDays,
+  normalizeFarmCage 
 } from './farmData';
 import { 
   X, 
@@ -38,8 +39,8 @@ import { EditCageModal } from './EditCageModal';
 
 interface FarmCageProfileModalProps {
   cage: FarmCage;
-  allCages: FarmCage[];
-  allAreas: FarmArea[];
+  allCages?: FarmCage[];
+  allAreas?: FarmArea[];
   onClose: () => void;
   onUpdateCage: (updatedCage: FarmCage, secondCageUpdate?: FarmCage) => void;
   onDeleteCage?: (cageId: string) => void;
@@ -51,9 +52,9 @@ interface FarmCageProfileModalProps {
 type TabType = 'overview' | 'actions' | 'weight' | 'health' | 'treatment' | 'history';
 
 export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
-  cage,
-  allCages,
-  allAreas,
+  cage: rawCage,
+  allCages = [],
+  allAreas = [],
   onClose,
   onUpdateCage,
   onDeleteCage,
@@ -61,6 +62,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
   userRole = 'guest',
   onOpenAdminLogin
 }) => {
+  const cage = useMemo(() => normalizeFarmCage(rawCage), [rawCage]);
 
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
@@ -116,16 +118,16 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
   const [deathReason, setDeathReason] = useState<string>('Kiệt sức / không đáp ứng phác đồ');
 
   // Danh sách các Ô gợi ý
-  const availablePartners = allCages.filter(c => 
+  const availablePartners = (allCages || []).filter(c => 
     c.areaKind === 'sinh_san' && 
     c.id !== cage.id && 
     c.status === 'san_sang_ghep' &&
     ((cage.gender === 'cai' && c.gender === 'duc') || (cage.gender === 'duc' && c.gender === 'cai'))
   );
 
-  const availableBabyCages = allCages.filter(c => c.areaKind === 'baby');
-  const availableTreatmentCages = allCages.filter(c => c.areaKind === 'dieu_tri');
-  const availableCommercialCages = allCages.filter(c => c.areaKind === 'thuong_pham');
+  const availableBabyCages = (allCages || []).filter(c => c.areaKind === 'baby');
+  const availableTreatmentCages = (allCages || []).filter(c => c.areaKind === 'dieu_tri');
+  const availableCommercialCages = (allCages || []).filter(c => c.areaKind === 'thuong_pham');
 
   const showSuccess = (msg: string) => {
     setActionSuccessMsg(msg);
@@ -157,8 +159,8 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
     const updated: FarmCage = {
       ...cage,
       currentWeightKg: val,
-      weightHistory: [newRecord, ...cage.weightHistory],
-      history: [newHistoryItem, ...cage.history]
+      weightHistory: [newRecord, ...(cage.weightHistory || [])],
+      history: [newHistoryItem, ...(cage.history || [])]
     };
 
     onUpdateCage(updated);
@@ -189,8 +191,8 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
 
     const updated: FarmCage = {
       ...cage,
-      healthHistory: [newRecord, ...cage.healthHistory],
-      history: [newHistoryItem, ...cage.history]
+      healthHistory: [newRecord, ...(cage.healthHistory || [])],
+      history: [newHistoryItem, ...(cage.history || [])]
     };
 
     onUpdateCage(updated);
@@ -227,7 +229,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           relatedCageCode: partner.code,
           actor: 'Phan Dũng'
         },
-        ...cage.history
+        ...(cage.history || [])
       ]
     };
 
@@ -250,7 +252,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           relatedCageCode: cage.code,
           actor: 'Phan Dũng'
         },
-        ...partner.history
+        ...(partner.history || [])
       ]
     };
 
@@ -285,7 +287,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           relatedCageCode: cage.partnerCageCode,
           actor: 'Phan Dũng'
         },
-        ...cage.history
+        ...(cage.history || [])
       ]
     } : {
       ...cage,
@@ -303,7 +305,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           relatedCageCode: cage.partnerCageCode,
           actor: 'Phan Dũng'
         },
-        ...cage.history
+        ...(cage.history || [])
       ]
     };
 
@@ -325,7 +327,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
             relatedCageCode: cage.code,
             actor: 'Phan Dũng'
           },
-          ...partner.history
+          ...(partner.history || [])
         ]
       } : {
         ...partner,
@@ -345,7 +347,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
             relatedCageCode: cage.code,
             actor: 'Phan Dũng'
           },
-          ...partner.history
+          ...(partner.history || [])
         ]
       };
     }
@@ -449,7 +451,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           relatedCageCode: targetBabyCage?.code,
           actor: 'Phan Dũng'
         },
-        ...cage.history
+        ...(cage.history || [])
       ]
     };
 
@@ -476,7 +478,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
             relatedCageCode: cage.code,
             actor: 'Phan Dũng'
           },
-          ...targetBabyCage.history
+          ...(targetBabyCage.history || [])
         ]
       };
     }
@@ -537,7 +539,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           relatedCageCode: targetTreatment.code,
           actor: 'Phan Dũng'
         },
-        ...cage.history
+        ...(cage.history || [])
       ]
     };
 
@@ -571,7 +573,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           relatedCageCode: cage.code,
           actor: 'Phan Dũng'
         },
-        ...targetTreatment.history
+        ...(targetTreatment.history || [])
       ]
     };
 
@@ -635,7 +637,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           relatedCageCode: cage.sourceCageCode,
           actor: 'Phan Dũng'
         },
-        ...cage.history
+        ...(cage.history || [])
       ]
     };
 
@@ -656,7 +658,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
             relatedCageCode: cage.code,
             actor: 'Phan Dũng'
           },
-          ...oldCage.history
+          ...(oldCage.history || [])
         ]
       };
     }
@@ -688,7 +690,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           relatedCageCode: targetCommercial.code,
           actor: 'Phan Dũng'
         },
-        ...cage.history
+        ...(cage.history || [])
       ]
     };
 
@@ -706,7 +708,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           relatedCageCode: cage.code,
           actor: 'Phan Dũng'
         },
-        ...targetCommercial.history
+        ...(targetCommercial.history || [])
       ]
     };
 
@@ -851,7 +853,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
               activeTab === 'weight' ? 'border-emerald-600 text-emerald-700' : 'border-transparent hover:text-slate-900'
             }`}
           >
-            ⚖️ Trọng lượng ({cage.weightHistory.length})
+            ⚖️ Trọng lượng ({(cage.weightHistory || []).length})
           </button>
 
           <button
@@ -860,7 +862,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
               activeTab === 'health' ? 'border-emerald-600 text-emerald-700' : 'border-transparent hover:text-slate-900'
             }`}
           >
-            🩺 Sức khỏe ({cage.healthHistory.length})
+            🩺 Sức khỏe ({(cage.healthHistory || []).length})
           </button>
 
           {cage.areaKind === 'dieu_tri' && (
@@ -880,7 +882,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
               activeTab === 'history' ? 'border-emerald-600 text-emerald-700' : 'border-transparent hover:text-slate-900'
             }`}
           >
-            📜 Lịch sử ({cage.history.length})
+            📜 Lịch sử ({(cage.history || []).length})
           </button>
         </div>
 
@@ -921,8 +923,10 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
 
                 {cage.status === 'ghep_doi' && (
                   <p className="text-slate-700">
-                    Đang ghép đôi cùng Ô <strong>{cage.partnerCageCode}</strong> từ ngày <strong>{formatDateVN(cage.matingDate)}</strong>. 
-                    Lịch tách ghép dự kiến (+20 ngày): <strong>{formatDateVN(addDays(cage.matingDate || '', 20))}</strong>.
+                    Đang ghép đôi cùng Ô <strong>{cage.partnerCageCode || '---'}</strong> từ ngày <strong>{formatDateVN(cage.matingDate)}</strong>. 
+                    {cage.matingDate ? (
+                      <> Lịch tách ghép dự kiến (+20 ngày): <strong>{formatDateVN(addDays(cage.matingDate, 20))}</strong>.</>
+                    ) : null}
                   </p>
                 )}
 
@@ -1367,12 +1371,12 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
               </form>
 
               <div className="space-y-2">
-                <span className="font-bold text-slate-800 block">Lịch sử cân định kỳ ({cage.weightHistory.length})</span>
-                {cage.weightHistory.length === 0 ? (
+                <span className="font-bold text-slate-800 block">Lịch sử cân định kỳ ({(cage.weightHistory || []).length})</span>
+                {(cage.weightHistory || []).length === 0 ? (
                   <p className="text-slate-400 italic">Chưa có bản ghi cân nặng nào.</p>
                 ) : (
                   <div className="space-y-1.5">
-                    {cage.weightHistory.map(w => (
+                    {(cage.weightHistory || []).map(w => (
                       <div key={w.id} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex justify-between items-center">
                         <div>
                           <strong className="font-mono text-emerald-800 text-sm">{w.weightKg} kg</strong>
@@ -1429,18 +1433,25 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
               </form>
 
               <div className="space-y-2">
-                <span className="font-bold text-slate-800 block">Lịch sử theo dõi sức khỏe ({cage.healthHistory.length})</span>
-                {cage.healthHistory.map(h => (
-                  <div key={h.id} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                    <div className="flex justify-between items-center">
-                      <span className={`font-bold px-2 py-0.5 rounded-md text-[10px] ${
-                        h.status === 'khoe_manh' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                      }`}>
-                        {h.status.toUpperCase()}
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-mono">{formatDateVN(h.date)}</span>
+                <span className="font-bold text-slate-800 block">Lịch sử theo dõi sức khỏe ({(cage.healthHistory || []).length})</span>
+                {(cage.healthHistory || []).length === 0 ? (
+                  <p className="text-slate-400 italic">Chưa có bản ghi sức khỏe nào.</p>
+                ) : (
+                  (cage.healthHistory || []).map(h => (
+                    <div key={h.id} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                      <div className="flex justify-between items-center">
+                        <span className={`font-bold px-2 py-0.5 rounded-md text-[10px] ${
+                          h.status === 'khoe_manh' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          {h.status.toUpperCase()}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">{formatDateVN(h.date)}</span>
+                      </div>
+                      {h.notes && <p className="text-slate-600 text-[11px]">{h.notes}</p>}
                     </div>
-                    {h.notes && <p className="text-slate-600 text-[11px]">{h.notes}</p>}
+                  ))
+                )}
+              </div>
                   </div>
                 ))}
               </div>
@@ -1563,16 +1574,20 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           {/* TAB 6: LỊCH SỬ KHÔNG BỊ XÓA (ĐẶC TẢ 11) */}
           {activeTab === 'history' && (
             <div className="space-y-2.5">
-              <span className="font-bold text-slate-800 block">Dòng thời gian sự kiện ({cage.history.length})</span>
-              {cage.history.map(item => (
-                <div key={item.id} className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
-                  <div className="flex justify-between items-baseline">
-                    <span className="font-mono text-[10px] text-emerald-800 font-bold">{item.timestamp}</span>
-                    <span className="text-[10px] text-slate-400">Thực hiện: {item.actor || 'Phan Dũng'}</span>
+              <span className="font-bold text-slate-800 block">Dòng thời gian sự kiện ({(cage.history || []).length})</span>
+              {(cage.history || []).length === 0 ? (
+                <p className="text-slate-400 italic">Chưa có bản ghi sự kiện nào.</p>
+              ) : (
+                (cage.history || []).map(item => (
+                  <div key={item.id} className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+                    <div className="flex justify-between items-baseline">
+                      <span className="font-mono text-[10px] text-emerald-800 font-bold">{item.timestamp}</span>
+                      <span className="text-[10px] text-slate-400">Thực hiện: {item.actor || 'Phan Dũng'}</span>
+                    </div>
+                    <p className="text-slate-800 font-medium text-xs leading-relaxed">{item.summary}</p>
                   </div>
-                  <p className="text-slate-800 font-medium text-xs leading-relaxed">{item.summary}</p>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           )}
         </div>

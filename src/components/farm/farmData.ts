@@ -1303,11 +1303,17 @@ export function formatDateVN(dateStr?: string): string {
   return dateStr;
 }
 
-// Helper: Thêm ngày vào date string YYYY-MM-DD
-export function addDays(dateStr: string, days: number): string {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+// Helper: Thêm ngày vào date string YYYY-MM-DD (Tuyệt đối an toàn, không bao giờ văng ngoại lệ RangeError)
+export function addDays(dateStr?: string, days: number = 0): string {
+  if (!dateStr || typeof dateStr !== 'string' || !dateStr.trim()) return '';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '';
+    d.setDate(d.getDate() + days);
+    return d.toISOString().split('T')[0];
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -2051,4 +2057,43 @@ export function findGapAndNextCageCodes(
   }
 
   return { gapCodes, nextCodes };
+}
+
+/**
+ * Đảm bảo mọi thuộc tính của FarmCage luôn an toàn và đầy đủ,
+ * đặc biệt là các mảng con (weightHistory, healthHistory, treatmentFollowups, history)
+ * không bao giờ bị undefined khi đồng bộ từ Firebase Realtime Database.
+ */
+export function normalizeFarmCage(c: any): FarmCage {
+  if (!c || typeof c !== 'object') return c;
+  const isTrong = c.status === 'trong';
+  
+  const toCleanArray = (val: any): any[] => {
+    if (!val) return [];
+    if (Array.isArray(val)) return val.filter(Boolean);
+    if (typeof val === 'object') {
+      try {
+        return Object.values(val).filter(Boolean);
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
+  return {
+    ...c,
+    id: c.id || `cage-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    code: c.code || 'CH-00',
+    status: c.status || 'trong',
+    statusLabel: c.statusLabel || (isTrong ? 'Trống' : 'Không xác định'),
+    species: c.species || 'moc_dai',
+    gender: isTrong ? (c.gender || undefined) : (c.gender || 'dan'),
+    ratCount: typeof c.ratCount === 'number' ? c.ratCount : (isTrong ? 0 : 1),
+    weightHistory: toCleanArray(c.weightHistory),
+    healthHistory: toCleanArray(c.healthHistory),
+    treatmentFollowups: toCleanArray(c.treatmentFollowups),
+    history: toCleanArray(c.history),
+    notes: c.notes || ''
+  };
 }

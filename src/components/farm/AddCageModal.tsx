@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { FarmArea, FarmRow, FarmCage, CageStatus, DuiSpecies } from './farmTypes';
-import { findGapAndNextCageCodes } from './farmData';
+import { findGapAndNextCageCodes, normalizeFarmCage } from './farmData';
 import { 
   FarmStatusBusinessForm, 
   BusinessFormData, 
@@ -425,7 +425,7 @@ export const AddCageModal: React.FC<AddCageModalProps> = ({
       notes: notes || undefined
     };
 
-    onAddCage(newCage);
+    onAddCage(normalizeFarmCage(newCage));
     onClose();
   };
 
