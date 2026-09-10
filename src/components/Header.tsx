@@ -173,7 +173,7 @@ export const Header: React.FC<HeaderProps> = ({
                       ? 'bg-emerald-50 text-emerald-700 border-emerald-300' 
                       : 'bg-amber-50 text-amber-700 border-amber-300'
                   }`}
-                  title={isOnlineConnected ? 'Database Online Firestore đang đồng bộ thời gian thực đa thiết bị' : 'Đang kết nối lại Database Online'}
+                  title={isOnlineConnected ? 'Firebase Realtime Database đang đồng bộ thời gian thực đa thiết bị' : 'Đang kết nối lại Database Online'}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${isOnlineConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
                   <span className="hidden sm:inline">{isOnlineConnected ? 'Cloud Online' : 'Kết nối...'}</span>

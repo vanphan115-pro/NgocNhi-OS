@@ -1,26 +1,25 @@
 /**
- * Dịch vụ đồng bộ dữ liệu Online thời gian thực (Firestore Cloud Database)
+ * Dịch vụ đồng bộ dữ liệu Online thời gian thực (Firebase Realtime Database)
  * Hệ thống Dịch Vụ Ngọc Nhi (Trang Trại Dúi • Quán Ăn • Tiệc Cưới • Điều Hành)
  * 
- * Kiến trúc tách Document độc lập (Modular Collection nn_modules):
- * 1. Chống ghi đè từ thiết bị mới: Chỉ cho phép đồng bộ ghi sau khi đã tải xong dữ liệu từ Firestore.
- * 2. Migration an toàn: Chỉ đưa dữ liệu local lên Firestore khi cơ sở dữ liệu trên Cloud hoàn toàn chưa có dữ liệu.
- * 3. Tách dữ liệu thành từng Document theo từng phân hệ để tránh giới hạn kích thước (1MB) và xung đột ghi đa thiết bị.
- * 4. Tự động xác thực phiên kết nối (Firebase Auth) đáp ứng Security Rules không dùng 'allow read, write: if true'.
- * 5. Lắng nghe Realtime (onSnapshot) cập nhật tức thì giữa các máy tính và điện thoại.
+ * Kết nối trực tiếp vào:
+ * https://hethongdichvungocnhi-default-rtdb.asia-southeast1.firebasedatabase.app
+ * 
+ * Ưu điểm của Firebase Realtime Database:
+ * 1. Đồng bộ tức thì (Latency cực thấp < 100ms) giữa máy tính, máy tính bảng và điện thoại.
+ * 2. Không bị giới hạn domain (chạy mượt mà trên Vercel, localhost, custom domain).
+ * 3. Tách nhánh độc lập theo từng phân hệ (/nn_modules/{moduleName}).
+ * 4. Tự động chuyển đổi và migration dữ liệu từ LocalStorage lên Cloud Realtime Database khi chạy lần đầu.
  */
 
 import { 
-  collection, 
-  doc, 
-  onSnapshot, 
-  setDoc, 
-  getDoc, 
-  getDocs, 
-  setLogLevel,
+  ref, 
+  onValue, 
+  set, 
+  get, 
   Unsubscribe 
-} from 'firebase/firestore';
-import { db, ensureAuth } from './firebase';
+} from 'firebase/database';
+import { rtdb, ensureAuth } from './firebase';
 import { 
   TableBooking, 
   WeddingInquiry, 
@@ -42,8 +41,9 @@ import {
 } from '../components/farm/farmData';
 import { AdminAlertPayload } from '../utils/notificationSound';
 
-// Collection lưu trữ các module dữ liệu độc lập
+// Đường dẫn nhánh gốc lưu trữ các phân hệ trong Realtime Database
 export const MODULES_COLLECTION = 'nn_modules';
+export const MODULES_PATH = 'nn_modules';
 
 export interface SystemDataPayload {
   menuItems: MenuItem[];
@@ -61,17 +61,12 @@ export interface SystemDataPayload {
   physicalRegistry: Record<string, PhysicalLocationRecord>;
 }
 
-// Cấu hình log level silent để triệt tiêu các thông báo retry backoff nội bộ của Firestore SDK
-try {
-  setLogLevel('silent');
-} catch (e) {}
-
 // Trạng thái kiểm soát vòng đời Cloud Sync
 let isCloudReady = false;
 let isInitializing = false;
 const lastKnownHashes: Record<string, string> = {};
 
-// Debounce queue quản lý ghi dữ liệu Firestore để tối ưu lưu lượng ghi
+// Debounce queue quản lý ghi dữ liệu Realtime Database để gom cụm các thao tác liên tiếp
 let debounceTimer: any = null;
 let pendingSyncPayload: Partial<SystemDataPayload> = {};
 
@@ -83,12 +78,11 @@ export function isFirestoreQuotaExhausted(): boolean {
 }
 
 /**
- * Báo lỗi thao tác Firestore ra console và CustomEvent cho ứng dụng,
- * tuyệt đối KHÔNG tự động ngắt kết nối hay tắt mạng của Firestore để duy trì khả năng tự phục hồi/retry.
+ * Báo lỗi thao tác Realtime Database ra console và CustomEvent cho ứng dụng
  */
-function reportFirestoreError(contextMsg: string, err?: any) {
+function reportDatabaseError(contextMsg: string, err?: any) {
   const errMsg = err?.message || String(err || 'Không rõ lỗi');
-  console.warn(`⚠️ [Firestore Error - ${contextMsg}]:`, errMsg);
+  console.warn(`⚠️ [Realtime Database Error - ${contextMsg}]:`, errMsg);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('nn_sync_error', { 
       detail: { context: contextMsg, error: err, message: errMsg } 
@@ -97,8 +91,7 @@ function reportFirestoreError(contextMsg: string, err?: any) {
 }
 
 /**
- * Kiểm tra xem thiết bị đã tải xong dữ liệu từ Cloud và sẵn sàng đồng bộ hay chưa.
- * Tuyệt đối không cho phép ghi khi chưa sẵn sàng.
+ * Kiểm tra xem thiết bị đã kết nối và tải dữ liệu từ Realtime Database hay chưa
  */
 export function isOnlineSyncReady(): boolean {
   return isCloudReady;
@@ -251,7 +244,7 @@ export function getLocalFallbackData(): SystemDataPayload {
 }
 
 /**
- * Đăng ký lắng nghe Realtime từ Firestore theo kiến trúc Document độc lập
+ * Đăng ký lắng nghe Realtime từ Firebase Realtime Database
  */
 export function subscribeToOnlineDatabase(
   onDataChange: (data: Partial<SystemDataPayload>) => void,
@@ -264,132 +257,126 @@ export function subscribeToOnlineDatabase(
     isInitializing = true;
 
     try {
-      // 1. Đảm bảo phiên xác thực hợp lệ trước khi gửi yêu cầu lên Firestore
-      await ensureAuth();
-
-      // 2. Kiểm tra xem Firestore nn_modules đã có dữ liệu hay chưa
-      const modulesColRef = collection(db, MODULES_COLLECTION);
-      let colSnap;
+      // 1. Kích hoạt phiên xác thực nếu cần
       try {
-        colSnap = await getDocs(modulesColRef);
-      } catch (getDocsErr: any) {
-        reportFirestoreError('Đọc dữ liệu ban đầu', getDocsErr);
-        if (onError) onError(getDocsErr);
-        // Nạp fallback local để giao diện hoạt động ngay lập tức, không ngắt kết nối
+        await Promise.race([
+          ensureAuth(),
+          new Promise((r) => setTimeout(r, 800))
+        ]);
+      } catch (e) {}
+
+      // 2. Lắng nghe trạng thái kết nối mạng của Realtime Database
+      try {
+        const connectedRef = ref(rtdb, '.info/connected');
+        onValue(connectedRef, (snap) => {
+          const isConnected = snap.val() === true;
+          if (isConnected) {
+            console.log('✓ Đã kết nối Firebase Realtime Database thành công (hethongdichvungocnhi-default-rtdb)');
+          }
+        });
+      } catch (e) {}
+
+      // 3. Đọc dữ liệu ban đầu hoặc kiểm tra xem Realtime Database đã có dữ liệu chưa
+      const rootModulesRef = ref(rtdb, MODULES_PATH);
+      let initialSnap: any = null;
+      try {
+        initialSnap = await get(rootModulesRef);
+      } catch (getErr: any) {
+        reportDatabaseError('Đọc dữ liệu ban đầu', getErr);
+        if (onError) onError(getErr);
         onDataChange(getLocalFallbackData());
         isCloudReady = true;
       }
 
-      const initialPayload: Partial<SystemDataPayload> = {};
-      const hasOnlineData = !!(colSnap && !colSnap.empty);
+      const hasOnlineData = initialSnap && initialSnap.exists() && initialSnap.val();
 
       if (hasOnlineData) {
-        // TRƯỜNG HỢP 1: Firestore ĐÃ CÓ DỮ LIỆU
-        // Tải toàn bộ dữ liệu từ Firestore về thiết bị, tuyệt đối không ghi đè dữ liệu Cloud
-        console.log('✓ Phát hiện dữ liệu Firestore Online. Đang đồng bộ về thiết bị...');
-        colSnap!.forEach((docSnap) => {
-          const docId = docSnap.id;
-          const data = docSnap.data();
+        // TRƯỜNG HỢP 1: Realtime Database ĐÃ CÓ DỮ LIỆU
+        console.log('✓ Phát hiện dữ liệu trên Firebase Realtime Database. Đang đồng bộ về thiết bị...');
+        const modulesData = initialSnap.val();
+        const initialPayload: Partial<SystemDataPayload> = {};
 
-          switch (docId) {
-            case 'restaurant_menu':
-              if (Array.isArray(data.items)) {
-                initialPayload.menuItems = data.items;
-                lastKnownHashes['menuItems'] = fastHash(data.items);
-                localStorage.setItem('nn_menu_items_v6', JSON.stringify(data.items));
-              }
-              break;
-            case 'table_bookings':
-              if (Array.isArray(data.items)) {
-                const clean = data.items.filter((b: any) => !['tb-001', 'tb-002', 'tb-003', 'tb-3048'].includes(b.id) && b.code !== 'NN-TB-3048');
-                initialPayload.bookings = clean;
-                lastKnownHashes['bookings'] = fastHash(clean);
-                localStorage.setItem('nn_table_bookings', JSON.stringify(clean));
-              }
-              break;
-            case 'wedding_inquiries':
-              if (Array.isArray(data.items)) {
-                const clean = data.items.filter((w: any) => !['wd-001', 'wd-002', 'wd-003'].includes(w.id));
-                initialPayload.weddingInquiries = clean;
-                lastKnownHashes['weddingInquiries'] = fastHash(clean);
-                localStorage.setItem('nn_wedding_inquiries', JSON.stringify(clean));
-              }
-              break;
-            case 'restaurant_orders':
-              if (Array.isArray(data.items)) {
-                initialPayload.restaurantOrders = data.items;
-                lastKnownHashes['restaurantOrders'] = fastHash(data.items);
-                localStorage.setItem('nn_restaurant_orders', JSON.stringify(data.items));
-              }
-              break;
-            case 'dui_orders':
-              if (Array.isArray(data.items)) {
-                initialPayload.duiOrders = data.items;
-                lastKnownHashes['duiOrders'] = fastHash(data.items);
-                localStorage.setItem('nn_dui_orders', JSON.stringify(data.items));
-              }
-              break;
-            case 'external_finance':
-              if (Array.isArray(data.items)) {
-                initialPayload.externalRecords = data.items;
-                lastKnownHashes['externalRecords'] = fastHash(data.items);
-                localStorage.setItem('nn_external_finance_transactions', JSON.stringify(data.items));
-              }
-              break;
-            case 'admin_notifications':
-              if (Array.isArray(data.items)) {
-                initialPayload.adminNotifications = data.items;
-                lastKnownHashes['adminNotifications'] = fastHash(data.items);
-                localStorage.setItem('nn_admin_notifications', JSON.stringify(data.items));
-              }
-              break;
-            case 'farm_areas':
-              if (Array.isArray(data.items)) {
-                initialPayload.farmAreas = data.items;
-                lastKnownHashes['farmAreas'] = fastHash(data.items);
-                localStorage.setItem('farm_areas_real_v3', JSON.stringify(data.items));
-              }
-              break;
-            case 'farm_rows':
-              if (Array.isArray(data.items)) {
-                initialPayload.farmRows = data.items;
-                lastKnownHashes['farmRows'] = fastHash(data.items);
-                localStorage.setItem('farm_rows_real_v3', JSON.stringify(data.items));
-              }
-              break;
-            case 'farm_cages':
-              if (Array.isArray(data.items)) {
-                initialPayload.farmCages = data.items;
-                lastKnownHashes['farmCages'] = fastHash(data.items);
-                localStorage.setItem('farm_cages_real_v3', JSON.stringify(data.items));
-              }
-              break;
-            case 'farm_disinfection':
-              if (Array.isArray(data.items)) {
-                initialPayload.farmDisinfection = data.items;
-                lastKnownHashes['farmDisinfection'] = fastHash(data.items);
-                localStorage.setItem('farm_disinfection_real_v3', JSON.stringify(data.items));
-              }
-              break;
-            case 'farm_tasks':
-              if (Array.isArray(data.items)) {
-                initialPayload.farmTasks = data.items;
-                lastKnownHashes['farmTasks'] = fastHash(data.items);
-                localStorage.setItem('farm_custom_tasks_v3', JSON.stringify(data.items));
-              }
-              break;
-            case 'physical_registry':
-              if (data.registry && typeof data.registry === 'object') {
-                initialPayload.physicalRegistry = data.registry;
-                lastKnownHashes['physicalRegistry'] = fastHash(data.registry);
-                savePhysicalRegistry(data.registry);
-              }
-              break;
-          }
-        });
+        if (modulesData.restaurant_menu?.items && Array.isArray(modulesData.restaurant_menu.items)) {
+          initialPayload.menuItems = modulesData.restaurant_menu.items;
+          lastKnownHashes['menuItems'] = fastHash(modulesData.restaurant_menu.items);
+          localStorage.setItem('nn_menu_items_v6', JSON.stringify(modulesData.restaurant_menu.items));
+        }
 
-        // Đánh dấu migration đã hoàn tất trên thiết bị này
-        localStorage.setItem('nn_firestore_migration_done', 'true');
+        if (modulesData.table_bookings?.items && Array.isArray(modulesData.table_bookings.items)) {
+          const clean = modulesData.table_bookings.items.filter((b: any) => !['tb-001', 'tb-002', 'tb-003', 'tb-3048'].includes(b.id) && b.code !== 'NN-TB-3048');
+          initialPayload.bookings = clean;
+          lastKnownHashes['bookings'] = fastHash(clean);
+          localStorage.setItem('nn_table_bookings', JSON.stringify(clean));
+        }
+
+        if (modulesData.wedding_inquiries?.items && Array.isArray(modulesData.wedding_inquiries.items)) {
+          const clean = modulesData.wedding_inquiries.items.filter((w: any) => !['wd-001', 'wd-002', 'wd-003'].includes(w.id));
+          initialPayload.weddingInquiries = clean;
+          lastKnownHashes['weddingInquiries'] = fastHash(clean);
+          localStorage.setItem('nn_wedding_inquiries', JSON.stringify(clean));
+        }
+
+        if (modulesData.restaurant_orders?.items && Array.isArray(modulesData.restaurant_orders.items)) {
+          initialPayload.restaurantOrders = modulesData.restaurant_orders.items;
+          lastKnownHashes['restaurantOrders'] = fastHash(modulesData.restaurant_orders.items);
+          localStorage.setItem('nn_restaurant_orders', JSON.stringify(modulesData.restaurant_orders.items));
+        }
+
+        if (modulesData.dui_orders?.items && Array.isArray(modulesData.dui_orders.items)) {
+          initialPayload.duiOrders = modulesData.dui_orders.items;
+          lastKnownHashes['duiOrders'] = fastHash(modulesData.dui_orders.items);
+          localStorage.setItem('nn_dui_orders', JSON.stringify(modulesData.dui_orders.items));
+        }
+
+        if (modulesData.external_finance?.items && Array.isArray(modulesData.external_finance.items)) {
+          initialPayload.externalRecords = modulesData.external_finance.items;
+          lastKnownHashes['externalRecords'] = fastHash(modulesData.external_finance.items);
+          localStorage.setItem('nn_external_finance_transactions', JSON.stringify(modulesData.external_finance.items));
+        }
+
+        if (modulesData.admin_notifications?.items && Array.isArray(modulesData.admin_notifications.items)) {
+          initialPayload.adminNotifications = modulesData.admin_notifications.items;
+          lastKnownHashes['adminNotifications'] = fastHash(modulesData.admin_notifications.items);
+          localStorage.setItem('nn_admin_notifications', JSON.stringify(modulesData.admin_notifications.items));
+        }
+
+        if (modulesData.farm_areas?.items && Array.isArray(modulesData.farm_areas.items)) {
+          initialPayload.farmAreas = modulesData.farm_areas.items;
+          lastKnownHashes['farmAreas'] = fastHash(modulesData.farm_areas.items);
+          localStorage.setItem('farm_areas_real_v3', JSON.stringify(modulesData.farm_areas.items));
+        }
+
+        if (modulesData.farm_rows?.items && Array.isArray(modulesData.farm_rows.items)) {
+          initialPayload.farmRows = modulesData.farm_rows.items;
+          lastKnownHashes['farmRows'] = fastHash(modulesData.farm_rows.items);
+          localStorage.setItem('farm_rows_real_v3', JSON.stringify(modulesData.farm_rows.items));
+        }
+
+        if (modulesData.farm_cages?.items && Array.isArray(modulesData.farm_cages.items)) {
+          initialPayload.farmCages = modulesData.farm_cages.items;
+          lastKnownHashes['farmCages'] = fastHash(modulesData.farm_cages.items);
+          localStorage.setItem('farm_cages_real_v3', JSON.stringify(modulesData.farm_cages.items));
+        }
+
+        if (modulesData.farm_disinfection?.items && Array.isArray(modulesData.farm_disinfection.items)) {
+          initialPayload.farmDisinfection = modulesData.farm_disinfection.items;
+          lastKnownHashes['farmDisinfection'] = fastHash(modulesData.farm_disinfection.items);
+          localStorage.setItem('farm_disinfection_real_v3', JSON.stringify(modulesData.farm_disinfection.items));
+        }
+
+        if (modulesData.farm_tasks?.items && Array.isArray(modulesData.farm_tasks.items)) {
+          initialPayload.farmTasks = modulesData.farm_tasks.items;
+          lastKnownHashes['farmTasks'] = fastHash(modulesData.farm_tasks.items);
+          localStorage.setItem('farm_custom_tasks_v3', JSON.stringify(modulesData.farm_tasks.items));
+        }
+
+        if (modulesData.physical_registry?.registry && typeof modulesData.physical_registry.registry === 'object') {
+          initialPayload.physicalRegistry = modulesData.physical_registry.registry;
+          lastKnownHashes['physicalRegistry'] = fastHash(modulesData.physical_registry.registry);
+          savePhysicalRegistry(modulesData.physical_registry.registry, false);
+        }
+
+        localStorage.setItem('nn_rtdb_migration_done', 'true');
 
         const fallback = getLocalFallbackData();
         const finalPayload: SystemDataPayload = {
@@ -408,7 +395,7 @@ export function subscribeToOnlineDatabase(
           physicalRegistry: initialPayload.physicalRegistry || fallback.physicalRegistry,
         };
 
-        // Đồng bộ hash để tránh trigger ghi ngược
+        // Cập nhật hash
         lastKnownHashes['menuItems'] = fastHash(finalPayload.menuItems);
         lastKnownHashes['bookings'] = fastHash(finalPayload.bookings);
         lastKnownHashes['weddingInquiries'] = fastHash(finalPayload.weddingInquiries);
@@ -427,259 +414,225 @@ export function subscribeToOnlineDatabase(
         isCloudReady = true;
 
       } else {
-        // TRƯỜNG HỢP 2: Firestore TRỐNG HOÀN TOÀN (chưa có document nào trong nn_modules)
-        // Kiểm tra xem có dữ liệu legacy từ doc cũ 'main_store' không
-        let legacyData: any = null;
-        try {
-          const legacySnap = await getDoc(doc(db, 'nn_system_data', 'main_store'));
-          if (legacySnap.exists()) {
-            legacyData = legacySnap.data();
-          }
-        } catch (e) {}
-
+        // TRƯỜNG HỢP 2: Realtime Database TRỐNG HOÀN TOÀN
+        // Tự động migration dữ liệu cục bộ hiện tại lên Realtime Database một lần duy nhất
         const fallback = getLocalFallbackData();
-        const initialDataToUpload: SystemDataPayload = legacyData ? {
-          menuItems: legacyData.menuItems || fallback.menuItems,
-          bookings: legacyData.bookings || fallback.bookings,
-          weddingInquiries: legacyData.weddingInquiries || fallback.weddingInquiries,
-          restaurantOrders: legacyData.restaurantOrders || fallback.restaurantOrders,
-          duiOrders: legacyData.duiOrders || fallback.duiOrders,
-          externalRecords: legacyData.externalRecords || fallback.externalRecords,
-          adminNotifications: legacyData.adminNotifications || fallback.adminNotifications,
-          farmAreas: legacyData.farmAreas || fallback.farmAreas,
-          farmRows: legacyData.farmRows || fallback.farmRows,
-          farmCages: legacyData.farmCages || fallback.farmCages,
-          farmDisinfection: legacyData.farmDisinfection || fallback.farmDisinfection,
-          farmTasks: legacyData.farmTasks || fallback.farmTasks,
-          physicalRegistry: legacyData.physicalRegistry || fallback.physicalRegistry,
-        } : fallback;
+        const now = new Date().toISOString();
 
-        // Chỉ migration một lần duy nhất khi Firestore thực sự trống
-        const alreadyMigrated = localStorage.getItem('nn_firestore_migration_done') === 'true';
-        if (!alreadyMigrated) {
-          console.log('✓ Firestore đang trống. Tự động migration dữ liệu localStorage lên Cloud một lần duy nhất...');
-          const now = new Date().toISOString();
-          try {
-            await Promise.all([
-              setDoc(doc(db, MODULES_COLLECTION, 'restaurant_menu'), { items: initialDataToUpload.menuItems, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'table_bookings'), { items: initialDataToUpload.bookings, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'wedding_inquiries'), { items: initialDataToUpload.weddingInquiries, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'restaurant_orders'), { items: initialDataToUpload.restaurantOrders, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'dui_orders'), { items: initialDataToUpload.duiOrders, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'external_finance'), { items: initialDataToUpload.externalRecords, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'admin_notifications'), { items: initialDataToUpload.adminNotifications, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'farm_areas'), { items: initialDataToUpload.farmAreas, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'farm_rows'), { items: initialDataToUpload.farmRows, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'farm_cages'), { items: initialDataToUpload.farmCages, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'farm_disinfection'), { items: initialDataToUpload.farmDisinfection, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'farm_tasks'), { items: initialDataToUpload.farmTasks, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'physical_registry'), { registry: initialDataToUpload.physicalRegistry, updatedAt: now }),
-              setDoc(doc(db, MODULES_COLLECTION, 'system_meta'), { initialized: true, createdAt: now, updatedAt: now, version: '2.0' })
-            ]);
-            localStorage.setItem('nn_firestore_migration_done', 'true');
-            console.log('✓ Hoàn tất migration dữ liệu lên Cloud Firestore thành công.');
-          } catch (migrationErr: any) {
-            reportFirestoreError('Migration dữ liệu ban đầu', migrationErr);
-            if (onError) onError(migrationErr);
-          }
+        console.log('✓ Firebase Realtime Database đang trống. Đang tự động tải dữ liệu hệ thống lên Cloud...');
+        try {
+          const uploadPayload: Record<string, any> = {
+            restaurant_menu: { items: fallback.menuItems, updatedAt: now },
+            table_bookings: { items: fallback.bookings, updatedAt: now },
+            wedding_inquiries: { items: fallback.weddingInquiries, updatedAt: now },
+            restaurant_orders: { items: fallback.restaurantOrders, updatedAt: now },
+            dui_orders: { items: fallback.duiOrders, updatedAt: now },
+            external_finance: { items: fallback.externalRecords, updatedAt: now },
+            admin_notifications: { items: fallback.adminNotifications, updatedAt: now },
+            farm_areas: { items: fallback.farmAreas, updatedAt: now },
+            farm_rows: { items: fallback.farmRows, updatedAt: now },
+            farm_cages: { items: fallback.farmCages, updatedAt: now },
+            farm_disinfection: { items: fallback.farmDisinfection, updatedAt: now },
+            farm_tasks: { items: fallback.farmTasks, updatedAt: now },
+            physical_registry: { registry: fallback.physicalRegistry, updatedAt: now },
+            system_meta: { initialized: true, createdAt: now, updatedAt: now, version: '3.0' }
+          };
+
+          await set(rootModulesRef, uploadPayload);
+          localStorage.setItem('nn_rtdb_migration_done', 'true');
+          console.log('✓ Đã khởi tạo và tải dữ liệu lên Firebase Realtime Database thành công.');
+        } catch (migrationErr: any) {
+          reportDatabaseError('Migration dữ liệu ban đầu', migrationErr);
+          if (onError) onError(migrationErr);
         }
 
-        lastKnownHashes['menuItems'] = fastHash(initialDataToUpload.menuItems);
-        lastKnownHashes['bookings'] = fastHash(initialDataToUpload.bookings);
-        lastKnownHashes['weddingInquiries'] = fastHash(initialDataToUpload.weddingInquiries);
-        lastKnownHashes['restaurantOrders'] = fastHash(initialDataToUpload.restaurantOrders);
-        lastKnownHashes['duiOrders'] = fastHash(initialDataToUpload.duiOrders);
-        lastKnownHashes['externalRecords'] = fastHash(initialDataToUpload.externalRecords);
-        lastKnownHashes['adminNotifications'] = fastHash(initialDataToUpload.adminNotifications);
-        lastKnownHashes['farmAreas'] = fastHash(initialDataToUpload.farmAreas);
-        lastKnownHashes['farmRows'] = fastHash(initialDataToUpload.farmRows);
-        lastKnownHashes['farmCages'] = fastHash(initialDataToUpload.farmCages);
-        lastKnownHashes['farmDisinfection'] = fastHash(initialDataToUpload.farmDisinfection);
-        lastKnownHashes['farmTasks'] = fastHash(initialDataToUpload.farmTasks);
-        lastKnownHashes['physicalRegistry'] = fastHash(initialDataToUpload.physicalRegistry);
+        lastKnownHashes['menuItems'] = fastHash(fallback.menuItems);
+        lastKnownHashes['bookings'] = fastHash(fallback.bookings);
+        lastKnownHashes['weddingInquiries'] = fastHash(fallback.weddingInquiries);
+        lastKnownHashes['restaurantOrders'] = fastHash(fallback.restaurantOrders);
+        lastKnownHashes['duiOrders'] = fastHash(fallback.duiOrders);
+        lastKnownHashes['externalRecords'] = fastHash(fallback.externalRecords);
+        lastKnownHashes['adminNotifications'] = fastHash(fallback.adminNotifications);
+        lastKnownHashes['farmAreas'] = fastHash(fallback.farmAreas);
+        lastKnownHashes['farmRows'] = fastHash(fallback.farmRows);
+        lastKnownHashes['farmCages'] = fastHash(fallback.farmCages);
+        lastKnownHashes['farmDisinfection'] = fastHash(fallback.farmDisinfection);
+        lastKnownHashes['farmTasks'] = fastHash(fallback.farmTasks);
+        lastKnownHashes['physicalRegistry'] = fastHash(fallback.physicalRegistry);
 
-        onDataChange(initialDataToUpload);
+        onDataChange(fallback);
         isCloudReady = true;
       }
 
-      // 3. Đăng ký lắng nghe thời gian thực onSnapshot cho toàn bộ collection nn_modules
-      unsubscribeSnapshot = onSnapshot(
-        modulesColRef,
+      // 4. Đăng ký lắng nghe thời gian thực onValue cho nhánh nn_modules
+      unsubscribeSnapshot = onValue(
+        rootModulesRef,
         (snapshot) => {
+          if (!snapshot.exists()) return;
+          const modulesData = snapshot.val();
+          if (!modulesData || typeof modulesData !== 'object') return;
+
           const deltaPayload: Partial<SystemDataPayload> = {};
           let hasChange = false;
 
-          snapshot.docChanges().forEach((change) => {
-            // BỎ QUA nếu là thay đổi cục bộ (local optimistic write) của chính thiết bị này đang ghi,
-            // ngăn chặn hoàn toàn vòng lặp phản xạ (echo loop) dẫn đến bùng nổ số lượng ghi
-            if (change.doc.metadata.hasPendingWrites) {
-              return;
+          // Phân hệ Thực đơn
+          if (modulesData.restaurant_menu?.items && Array.isArray(modulesData.restaurant_menu.items)) {
+            const h = fastHash(modulesData.restaurant_menu.items);
+            if (h !== lastKnownHashes['menuItems']) {
+              lastKnownHashes['menuItems'] = h;
+              deltaPayload.menuItems = modulesData.restaurant_menu.items;
+              localStorage.setItem('nn_menu_items_v6', JSON.stringify(modulesData.restaurant_menu.items));
+              hasChange = true;
             }
+          }
 
-            const docId = change.doc.id;
-            const data = change.doc.data();
-
-            switch (docId) {
-              case 'restaurant_menu':
-                if (Array.isArray(data.items)) {
-                  const h = fastHash(data.items);
-                  if (h !== lastKnownHashes['menuItems']) {
-                    lastKnownHashes['menuItems'] = h;
-                    deltaPayload.menuItems = data.items;
-                    localStorage.setItem('nn_menu_items_v6', JSON.stringify(data.items));
-                    hasChange = true;
-                  }
-                }
-                break;
-              case 'table_bookings':
-                if (Array.isArray(data.items)) {
-                  const h = fastHash(data.items);
-                  if (h !== lastKnownHashes['bookings']) {
-                    lastKnownHashes['bookings'] = h;
-                    deltaPayload.bookings = data.items;
-                    localStorage.setItem('nn_table_bookings', JSON.stringify(data.items));
-                    hasChange = true;
-                  }
-                }
-                break;
-              case 'wedding_inquiries':
-                if (Array.isArray(data.items)) {
-                  const h = fastHash(data.items);
-                  if (h !== lastKnownHashes['weddingInquiries']) {
-                    lastKnownHashes['weddingInquiries'] = h;
-                    deltaPayload.weddingInquiries = data.items;
-                    localStorage.setItem('nn_wedding_inquiries', JSON.stringify(data.items));
-                    hasChange = true;
-                  }
-                }
-                break;
-              case 'restaurant_orders':
-                if (Array.isArray(data.items)) {
-                  const h = fastHash(data.items);
-                  if (h !== lastKnownHashes['restaurantOrders']) {
-                    lastKnownHashes['restaurantOrders'] = h;
-                    deltaPayload.restaurantOrders = data.items;
-                    localStorage.setItem('nn_restaurant_orders', JSON.stringify(data.items));
-                    hasChange = true;
-                  }
-                }
-                break;
-              case 'dui_orders':
-                if (Array.isArray(data.items)) {
-                  const h = fastHash(data.items);
-                  if (h !== lastKnownHashes['duiOrders']) {
-                    lastKnownHashes['duiOrders'] = h;
-                    deltaPayload.duiOrders = data.items;
-                    localStorage.setItem('nn_dui_orders', JSON.stringify(data.items));
-                    hasChange = true;
-                  }
-                }
-                break;
-              case 'external_finance':
-                if (Array.isArray(data.items)) {
-                  const h = fastHash(data.items);
-                  if (h !== lastKnownHashes['externalRecords']) {
-                    lastKnownHashes['externalRecords'] = h;
-                    deltaPayload.externalRecords = data.items;
-                    localStorage.setItem('nn_external_finance_transactions', JSON.stringify(data.items));
-                    hasChange = true;
-                  }
-                }
-                break;
-              case 'admin_notifications':
-                if (Array.isArray(data.items)) {
-                  const h = fastHash(data.items);
-                  if (h !== lastKnownHashes['adminNotifications']) {
-                    lastKnownHashes['adminNotifications'] = h;
-                    deltaPayload.adminNotifications = data.items;
-                    localStorage.setItem('nn_admin_notifications', JSON.stringify(data.items));
-                    hasChange = true;
-                  }
-                }
-                break;
-              case 'farm_areas':
-                if (Array.isArray(data.items)) {
-                  const h = fastHash(data.items);
-                  if (h !== lastKnownHashes['farmAreas']) {
-                    lastKnownHashes['farmAreas'] = h;
-                    deltaPayload.farmAreas = data.items;
-                    localStorage.setItem('farm_areas_real_v3', JSON.stringify(data.items));
-                    hasChange = true;
-                  }
-                }
-                break;
-              case 'farm_rows':
-                if (Array.isArray(data.items)) {
-                  const h = fastHash(data.items);
-                  if (h !== lastKnownHashes['farmRows']) {
-                    lastKnownHashes['farmRows'] = h;
-                    deltaPayload.farmRows = data.items;
-                    localStorage.setItem('farm_rows_real_v3', JSON.stringify(data.items));
-                    hasChange = true;
-                  }
-                }
-                break;
-              case 'farm_cages':
-                if (Array.isArray(data.items)) {
-                  const h = fastHash(data.items);
-                  if (h !== lastKnownHashes['farmCages']) {
-                    lastKnownHashes['farmCages'] = h;
-                    deltaPayload.farmCages = data.items;
-                    localStorage.setItem('farm_cages_real_v3', JSON.stringify(data.items));
-                    hasChange = true;
-                  }
-                }
-                break;
-              case 'farm_disinfection':
-                if (Array.isArray(data.items)) {
-                  const h = fastHash(data.items);
-                  if (h !== lastKnownHashes['farmDisinfection']) {
-                    lastKnownHashes['farmDisinfection'] = h;
-                    deltaPayload.farmDisinfection = data.items;
-                    localStorage.setItem('farm_disinfection_real_v3', JSON.stringify(data.items));
-                    hasChange = true;
-                  }
-                }
-                break;
-              case 'farm_tasks':
-                if (Array.isArray(data.items)) {
-                  const h = fastHash(data.items);
-                  if (h !== lastKnownHashes['farmTasks']) {
-                    lastKnownHashes['farmTasks'] = h;
-                    deltaPayload.farmTasks = data.items;
-                    localStorage.setItem('farm_custom_tasks_v3', JSON.stringify(data.items));
-                    hasChange = true;
-                  }
-                }
-                break;
-              case 'physical_registry':
-                if (data.registry && typeof data.registry === 'object') {
-                  const h = fastHash(data.registry);
-                  if (h !== lastKnownHashes['physicalRegistry']) {
-                    lastKnownHashes['physicalRegistry'] = h;
-                    deltaPayload.physicalRegistry = data.registry;
-                    // Truyền emitRemoteSync = false để không kích hoạt lại nn_physical_registry_updated
-                    savePhysicalRegistry(data.registry, false);
-                    hasChange = true;
-                  }
-                }
-                break;
+          // Phân hệ Đặt bàn
+          if (modulesData.table_bookings?.items && Array.isArray(modulesData.table_bookings.items)) {
+            const h = fastHash(modulesData.table_bookings.items);
+            if (h !== lastKnownHashes['bookings']) {
+              lastKnownHashes['bookings'] = h;
+              deltaPayload.bookings = modulesData.table_bookings.items;
+              localStorage.setItem('nn_table_bookings', JSON.stringify(modulesData.table_bookings.items));
+              hasChange = true;
             }
-          });
+          }
+
+          // Phân hệ Tiệc cưới
+          if (modulesData.wedding_inquiries?.items && Array.isArray(modulesData.wedding_inquiries.items)) {
+            const h = fastHash(modulesData.wedding_inquiries.items);
+            if (h !== lastKnownHashes['weddingInquiries']) {
+              lastKnownHashes['weddingInquiries'] = h;
+              deltaPayload.weddingInquiries = modulesData.wedding_inquiries.items;
+              localStorage.setItem('nn_wedding_inquiries', JSON.stringify(modulesData.wedding_inquiries.items));
+              hasChange = true;
+            }
+          }
+
+          // Phân hệ Đơn hàng quán ăn
+          if (modulesData.restaurant_orders?.items && Array.isArray(modulesData.restaurant_orders.items)) {
+            const h = fastHash(modulesData.restaurant_orders.items);
+            if (h !== lastKnownHashes['restaurantOrders']) {
+              lastKnownHashes['restaurantOrders'] = h;
+              deltaPayload.restaurantOrders = modulesData.restaurant_orders.items;
+              localStorage.setItem('nn_restaurant_orders', JSON.stringify(modulesData.restaurant_orders.items));
+              hasChange = true;
+            }
+          }
+
+          // Phân hệ Đơn hàng dúi
+          if (modulesData.dui_orders?.items && Array.isArray(modulesData.dui_orders.items)) {
+            const h = fastHash(modulesData.dui_orders.items);
+            if (h !== lastKnownHashes['duiOrders']) {
+              lastKnownHashes['duiOrders'] = h;
+              deltaPayload.duiOrders = modulesData.dui_orders.items;
+              localStorage.setItem('nn_dui_orders', JSON.stringify(modulesData.dui_orders.items));
+              hasChange = true;
+            }
+          }
+
+          // Phân hệ Thu chi ngoài luồng
+          if (modulesData.external_finance?.items && Array.isArray(modulesData.external_finance.items)) {
+            const h = fastHash(modulesData.external_finance.items);
+            if (h !== lastKnownHashes['externalRecords']) {
+              lastKnownHashes['externalRecords'] = h;
+              deltaPayload.externalRecords = modulesData.external_finance.items;
+              localStorage.setItem('nn_external_finance_transactions', JSON.stringify(modulesData.external_finance.items));
+              hasChange = true;
+            }
+          }
+
+          // Phân hệ Thông báo quản trị
+          if (modulesData.admin_notifications?.items && Array.isArray(modulesData.admin_notifications.items)) {
+            const h = fastHash(modulesData.admin_notifications.items);
+            if (h !== lastKnownHashes['adminNotifications']) {
+              lastKnownHashes['adminNotifications'] = h;
+              deltaPayload.adminNotifications = modulesData.admin_notifications.items;
+              localStorage.setItem('nn_admin_notifications', JSON.stringify(modulesData.admin_notifications.items));
+              hasChange = true;
+            }
+          }
+
+          // Phân hệ Trang trại: Khu
+          if (modulesData.farm_areas?.items && Array.isArray(modulesData.farm_areas.items)) {
+            const h = fastHash(modulesData.farm_areas.items);
+            if (h !== lastKnownHashes['farmAreas']) {
+              lastKnownHashes['farmAreas'] = h;
+              deltaPayload.farmAreas = modulesData.farm_areas.items;
+              localStorage.setItem('farm_areas_real_v3', JSON.stringify(modulesData.farm_areas.items));
+              hasChange = true;
+            }
+          }
+
+          // Phân hệ Trang trại: Dãy
+          if (modulesData.farm_rows?.items && Array.isArray(modulesData.farm_rows.items)) {
+            const h = fastHash(modulesData.farm_rows.items);
+            if (h !== lastKnownHashes['farmRows']) {
+              lastKnownHashes['farmRows'] = h;
+              deltaPayload.farmRows = modulesData.farm_rows.items;
+              localStorage.setItem('farm_rows_real_v3', JSON.stringify(modulesData.farm_rows.items));
+              hasChange = true;
+            }
+          }
+
+          // Phân hệ Trang trại: Chuồng
+          if (modulesData.farm_cages?.items && Array.isArray(modulesData.farm_cages.items)) {
+            const h = fastHash(modulesData.farm_cages.items);
+            if (h !== lastKnownHashes['farmCages']) {
+              lastKnownHashes['farmCages'] = h;
+              deltaPayload.farmCages = modulesData.farm_cages.items;
+              localStorage.setItem('farm_cages_real_v3', JSON.stringify(modulesData.farm_cages.items));
+              hasChange = true;
+            }
+          }
+
+          // Phân hệ Trang trại: Khử trùng
+          if (modulesData.farm_disinfection?.items && Array.isArray(modulesData.farm_disinfection.items)) {
+            const h = fastHash(modulesData.farm_disinfection.items);
+            if (h !== lastKnownHashes['farmDisinfection']) {
+              lastKnownHashes['farmDisinfection'] = h;
+              deltaPayload.farmDisinfection = modulesData.farm_disinfection.items;
+              localStorage.setItem('farm_disinfection_real_v3', JSON.stringify(modulesData.farm_disinfection.items));
+              hasChange = true;
+            }
+          }
+
+          // Phân hệ Trang trại: Nhiệm vụ
+          if (modulesData.farm_tasks?.items && Array.isArray(modulesData.farm_tasks.items)) {
+            const h = fastHash(modulesData.farm_tasks.items);
+            if (h !== lastKnownHashes['farmTasks']) {
+              lastKnownHashes['farmTasks'] = h;
+              deltaPayload.farmTasks = modulesData.farm_tasks.items;
+              localStorage.setItem('farm_custom_tasks_v3', JSON.stringify(modulesData.farm_tasks.items));
+              hasChange = true;
+            }
+          }
+
+          // Bảng đăng ký vị trí QR
+          if (modulesData.physical_registry?.registry && typeof modulesData.physical_registry.registry === 'object') {
+            const h = fastHash(modulesData.physical_registry.registry);
+            if (h !== lastKnownHashes['physicalRegistry']) {
+              lastKnownHashes['physicalRegistry'] = h;
+              deltaPayload.physicalRegistry = modulesData.physical_registry.registry;
+              savePhysicalRegistry(modulesData.physical_registry.registry, false);
+              hasChange = true;
+            }
+          }
 
           if (hasChange) {
             onDataChange(deltaPayload);
-            window.dispatchEvent(new CustomEvent('nn_data_sync'));
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('nn_data_sync'));
+            }
           }
         },
         (err: any) => {
-          reportFirestoreError('Snapshot Listener', err);
+          reportDatabaseError('Lắng nghe thời gian thực (onValue)', err);
           if (onError) onError(err);
         }
       );
 
     } catch (error: any) {
-      reportFirestoreError('Khởi tạo ban đầu', error);
+      reportDatabaseError('Khởi tạo ban đầu', error);
       isCloudReady = true;
       if (onError) onError(error);
     }
@@ -693,7 +646,7 @@ export function subscribeToOnlineDatabase(
 }
 
 /**
- * Hàm thực hiện ghi dồn dập được gom cụm lên Firestore sau thời gian debounce
+ * Hàm thực hiện ghi dồn dập được gom cụm lên Firebase Realtime Database sau thời gian debounce
  */
 async function flushPendingSync(): Promise<void> {
   if (!isCloudReady) {
@@ -704,7 +657,6 @@ async function flushPendingSync(): Promise<void> {
   pendingSyncPayload = {};
 
   try {
-    await ensureAuth();
     const now = new Date().toISOString();
     const promises: Promise<any>[] = [];
 
@@ -713,7 +665,7 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['menuItems']) {
         lastKnownHashes['menuItems'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'restaurant_menu'), { items: dataToSync.menuItems, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/restaurant_menu`), { items: dataToSync.menuItems, updatedAt: now })
         );
       }
     }
@@ -723,7 +675,7 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['bookings']) {
         lastKnownHashes['bookings'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'table_bookings'), { items: dataToSync.bookings, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/table_bookings`), { items: dataToSync.bookings, updatedAt: now })
         );
       }
     }
@@ -733,7 +685,7 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['weddingInquiries']) {
         lastKnownHashes['weddingInquiries'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'wedding_inquiries'), { items: dataToSync.weddingInquiries, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/wedding_inquiries`), { items: dataToSync.weddingInquiries, updatedAt: now })
         );
       }
     }
@@ -743,7 +695,7 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['restaurantOrders']) {
         lastKnownHashes['restaurantOrders'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'restaurant_orders'), { items: dataToSync.restaurantOrders, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/restaurant_orders`), { items: dataToSync.restaurantOrders, updatedAt: now })
         );
       }
     }
@@ -753,7 +705,7 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['duiOrders']) {
         lastKnownHashes['duiOrders'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'dui_orders'), { items: dataToSync.duiOrders, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/dui_orders`), { items: dataToSync.duiOrders, updatedAt: now })
         );
       }
     }
@@ -763,7 +715,7 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['externalRecords']) {
         lastKnownHashes['externalRecords'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'external_finance'), { items: dataToSync.externalRecords, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/external_finance`), { items: dataToSync.externalRecords, updatedAt: now })
         );
       }
     }
@@ -773,7 +725,7 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['adminNotifications']) {
         lastKnownHashes['adminNotifications'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'admin_notifications'), { items: dataToSync.adminNotifications, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/admin_notifications`), { items: dataToSync.adminNotifications, updatedAt: now })
         );
       }
     }
@@ -783,7 +735,7 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['farmAreas']) {
         lastKnownHashes['farmAreas'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'farm_areas'), { items: dataToSync.farmAreas, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/farm_areas`), { items: dataToSync.farmAreas, updatedAt: now })
         );
       }
     }
@@ -793,7 +745,7 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['farmRows']) {
         lastKnownHashes['farmRows'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'farm_rows'), { items: dataToSync.farmRows, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/farm_rows`), { items: dataToSync.farmRows, updatedAt: now })
         );
       }
     }
@@ -803,7 +755,7 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['farmCages']) {
         lastKnownHashes['farmCages'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'farm_cages'), { items: dataToSync.farmCages, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/farm_cages`), { items: dataToSync.farmCages, updatedAt: now })
         );
       }
     }
@@ -813,7 +765,7 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['farmDisinfection']) {
         lastKnownHashes['farmDisinfection'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'farm_disinfection'), { items: dataToSync.farmDisinfection, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/farm_disinfection`), { items: dataToSync.farmDisinfection, updatedAt: now })
         );
       }
     }
@@ -823,7 +775,7 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['farmTasks']) {
         lastKnownHashes['farmTasks'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'farm_tasks'), { items: dataToSync.farmTasks, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/farm_tasks`), { items: dataToSync.farmTasks, updatedAt: now })
         );
       }
     }
@@ -833,38 +785,38 @@ async function flushPendingSync(): Promise<void> {
       if (h !== lastKnownHashes['physicalRegistry']) {
         lastKnownHashes['physicalRegistry'] = h;
         promises.push(
-          setDoc(doc(db, MODULES_COLLECTION, 'physical_registry'), { registry: dataToSync.physicalRegistry, updatedAt: now }, { merge: true })
+          set(ref(rtdb, `${MODULES_PATH}/physical_registry`), { registry: dataToSync.physicalRegistry, updatedAt: now })
         );
       }
     }
 
     if (promises.length > 0) {
       await Promise.all(promises);
+      console.log(`✓ Đã đồng bộ ${promises.length} phân hệ lên Firebase Realtime Database.`);
     }
   } catch (error: any) {
-    reportFirestoreError('Ghi dữ liệu', error);
+    reportDatabaseError('Ghi dữ liệu lên Realtime Database', error);
   }
 }
 
 /**
- * Đồng bộ an toàn từng phân hệ lên Firestore (Chỉ cập nhật document liên quan)
- * Áp dụng cơ chế DEBOUNCE QUEUE: gom cụm các thay đổi phát sinh liên tiếp trong 1.5 giây,
- * loại bỏ hoàn toàn tình trạng gửi hàng chục write request mỗi giây làm kiệt quệ hạn ngạch.
+ * Đồng bộ an toàn từng phân hệ lên Firebase Realtime Database (Chỉ cập nhật nhánh liên quan)
+ * Áp dụng cơ chế DEBOUNCE QUEUE: gom cụm các thay đổi phát sinh liên tiếp trong 1 giây để tối ưu
  */
 export async function syncOnlinePayload(partialData: Partial<SystemDataPayload>): Promise<void> {
   if (!isCloudReady) {
-    console.warn('⚠️ Từ chối đồng bộ lên Cloud: Thiết bị đang trong quá trình tải dữ liệu ban đầu.');
+    console.warn('⚠️ Từ chối đồng bộ lên Cloud: Thiết bị đang trong quá trình kết nối ban đầu.');
     return;
   }
 
   // Gom cụm payload vào hàng đợi
   pendingSyncPayload = { ...pendingSyncPayload, ...partialData };
 
-  // Khởi chạy hoặc làm mới bộ đếm debounce 1.5 giây
+  // Khởi chạy hoặc làm mới bộ đếm debounce 1 giây
   if (debounceTimer) {
     clearTimeout(debounceTimer);
   }
   debounceTimer = setTimeout(() => {
     flushPendingSync();
-  }, 1500);
+  }, 1000);
 }

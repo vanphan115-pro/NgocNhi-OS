@@ -40,11 +40,11 @@ service cloud.firestore {
 
     // 4. Quy tắc cho các phân hệ dữ liệu độc lập (nn_modules)
     match /nn_modules/{moduleId} {
-      // Bắt buộc xác thực request.auth != null và đúng ID module
-      allow read: if isAuthenticated() && isValidModuleId(moduleId);
+      // Cho phép đọc dữ liệu nếu đúng ID module đã định danh
+      allow read: if isValidModuleId(moduleId);
       
-      // Cho phép tạo hoặc cập nhật nếu đã xác thực, đúng ID module và payload có updatedAt hợp lệ
-      allow create, update: if isAuthenticated() && isValidModuleId(moduleId) && isValidPayload();
+      // Cho phép tạo hoặc cập nhật nếu đúng ID module và payload có updatedAt hợp lệ
+      allow create, update: if isValidModuleId(moduleId) && isValidPayload();
 
       // Tuyệt đối không cho phép xóa document phân hệ
       allow delete: if false;
@@ -52,7 +52,7 @@ service cloud.firestore {
 
     // 5. Cho phép đọc dữ liệu cũ để phục vụ migration dữ liệu nếu cần
     match /nn_system_data/{docId} {
-      allow read: if isAuthenticated() && docId == 'main_store';
+      allow read: if docId == 'main_store';
       allow write: if false;
     }
   }

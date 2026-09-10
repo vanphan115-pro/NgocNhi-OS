@@ -1,9 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { 
-  getFirestore, 
-  Firestore,
-  setLogLevel
-} from 'firebase/firestore';
+import { getAnalytics, isSupported } from 'firebase/analytics';
+import { getDatabase, Database } from 'firebase/database';
 import { 
   getAuth, 
   signInAnonymously, 
@@ -11,39 +8,42 @@ import {
   Auth, 
   User 
 } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
 
-// Khởi tạo Firebase App an toàn
-const app = getApps().length > 0 ? getApp() : initializeApp({
-  apiKey: firebaseConfig.apiKey,
-  authDomain: firebaseConfig.authDomain,
-  projectId: firebaseConfig.projectId,
-  storageBucket: firebaseConfig.storageBucket,
-  messagingSenderId: firebaseConfig.messagingSenderId,
-  appId: firebaseConfig.appId,
-});
+export const firebaseConfig = {
+  apiKey: "AIzaSyCGMjMNqOHxo3WHnHDt350WY5w02oI5k_M",
+  authDomain: "hethongdichvungocnhi.firebaseapp.com",
+  databaseURL: "https://hethongdichvungocnhi-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "hethongdichvungocnhi",
+  storageBucket: "hethongdichvungocnhi.firebasestorage.app",
+  messagingSenderId: "442352470681",
+  appId: "1:442352470681:web:a62038dae57b4f229b4608",
+  measurementId: "G-1GMMT43N8N"
+};
 
-// Lấy databaseId tùy biến từ firebase-applet-config.json nếu có
-const customDatabaseId = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-  ? firebaseConfig.firestoreDatabaseId
-  : undefined;
+// 1. Khởi tạo Firebase App với cấu hình chính xác của Hệ thống Dịch Vụ Ngọc Nhi
+export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// Thiết lập log level sang silent để ngăn Firestore SDK in cảnh báo retry rác khi mạng hoặc hạn ngạch quá tải
-try {
-  setLogLevel('silent');
-} catch (e) {}
+// 2. Khởi tạo Firebase Analytics an toàn (kiểm tra môi trường trình duyệt)
+export let analytics: any = null;
+if (typeof window !== 'undefined') {
+  isSupported().then((supported) => {
+    if (supported) {
+      analytics = getAnalytics(app);
+    }
+  }).catch(() => {});
+}
 
-export const db: Firestore = customDatabaseId
-  ? getFirestore(app, customDatabaseId)
-  : getFirestore(app);
+// 3. Khởi tạo Firebase Realtime Database trỏ chính xác vào databaseURL
+export const rtdb: Database = getDatabase(app, firebaseConfig.databaseURL);
+export const db: Database = rtdb;
 
+// 4. Khởi tạo Firebase Auth hỗ trợ phiên xác thực nếu có yêu cầu phân quyền
 export const auth: Auth = getAuth(app);
 
 let authInitPromise: Promise<User | null> | null = null;
 
 /**
- * Đảm bảo client đã có phiên xác thực hợp lệ (ngầm, không làm phiền người dùng)
- * Đáp ứng yêu cầu bảo mật Firestore request.auth != null trên đa thiết bị
+ * Đảm bảo client có phiên xác thực nếu cần (ngầm, không làm phiền người dùng)
  */
 export async function ensureAuth(): Promise<User | null> {
   if (auth.currentUser) return auth.currentUser;
@@ -68,28 +68,27 @@ export async function ensureAuth(): Promise<User | null> {
             unsub();
             finish(cred.user);
           } catch (err: any) {
-            console.warn('Lưu ý kết nối Firebase Auth:', err?.message || err);
             unsub();
             finish(null);
           }
         }
       });
 
-      // Fallback timeout tránh treo promise quá lâu nếu mạng chậm
+      // Fallback timeout nhanh (800ms) để không làm chặn tải dữ liệu nếu Realtime Database cho phép đọc/ghi công khai
       setTimeout(() => {
         if (!settled) {
           finish(auth.currentUser);
         }
-      }, 5000);
+      }, 800);
     });
   }
   
   const res = await authInitPromise;
-  // Nếu chưa có phiên xác thực, cho phép thử lại ở lần gọi kế tiếp
   if (!res && !auth.currentUser) {
     authInitPromise = null;
   }
   return res || auth.currentUser;
 }
 
-export default db;
+export default rtdb;
+
