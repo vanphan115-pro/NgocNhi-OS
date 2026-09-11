@@ -1452,9 +1452,6 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
                   ))
                 )}
               </div>
-                  </div>
-                ))}
-              </div>
             </div>
           )}
 
