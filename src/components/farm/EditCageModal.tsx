@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { FarmCage, CageStatus, FarmArea } from './farmTypes';
-import { normalizeFarmCage } from './farmData';
+import { normalizeFarmCage, formatDateVN, addDays } from './farmData';
 import { 
   FarmStatusBusinessForm, 
   BusinessFormData, 
@@ -31,6 +31,7 @@ export const EditCageModal: React.FC<EditCageModalProps> = ({
   }, [cage.areaKind]);
 
   const [cageCode, setCageCode] = useState<string>(cage.code || '');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [slotNumber, setSlotNumber] = useState<string>(cage.slotNumber || '');
   const [tier, setTier] = useState<number>(cage.tier || 1);
   const [notes, setNotes] = useState<string>(cage.notes || '');
@@ -41,7 +42,7 @@ export const EditCageModal: React.FC<EditCageModalProps> = ({
   // Form data nghiệp vụ chi tiết khởi tạo từ cage
   const [formData, setFormData] = useState<BusinessFormData>({
     status: cage.status,
-    ratCount: cage.ratCount !== undefined ? cage.ratCount : '',
+    ratCount: cage.status === 'trong' ? 0 : (cage.status === 'ghep_doi' ? 2 : (cage.areaKind === 'sinh_san' ? 1 : (cage.ratCount !== undefined ? cage.ratCount : ''))),
     species: cage.species || 'moc_dai',
     gender: cage.gender || (cage.areaKind === 'sinh_san' ? 'cai' : 'dan'),
     
@@ -59,7 +60,7 @@ export const EditCageModal: React.FC<EditCageModalProps> = ({
     
     // Tách đực / Tách cái
     matingSeparationDate: cage.matingSeparationDate || todayStr,
-    followupDurationDays: cage.followupDurationDays !== undefined ? cage.followupDurationDays : (cage.status === 'moi_tach_duc' ? 60 : cage.status === 'moi_tach_cai' ? 10 : ''),
+    followupDurationDays: cage.followupDurationDays !== undefined ? cage.followupDurationDays : ((cage.status === 'moi_tach_duc' || cage.status === 'moi_tach_duc_khong_ro') ? 60 : cage.status === 'moi_tach_cai' ? 10 : ''),
     expectedEvaluationDate: cage.expectedEvaluationDate || todayStr,
     
     // Mới tách con
@@ -127,13 +128,24 @@ export const EditCageModal: React.FC<EditCageModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
 
     const isTrống = formData.status === 'trong';
     const isDead = formData.status === 'chet';
     const statusLabel = getCageStatusLabel(formData.status);
     const weightNum = !isTrống && formData.currentWeightKg ? parseFloat(formData.currentWeightKg) : undefined;
-    const finalCode = cageCode.trim() || cage.code;
-    const isCodeChanged = finalCode !== cage.code;
+    const finalCode = cageCode.trim().toUpperCase() || cage.code;
+    const isCodeChanged = finalCode !== cage.code.toUpperCase();
+
+    if (isCodeChanged) {
+      const exists = allCages.some(
+        c => c.id !== cage.id && c.areaId === cage.areaId && c.code.trim().toUpperCase() === finalCode
+      );
+      if (exists) {
+        setErrorMessage(`Mã ô "${finalCode}" đã tồn tại trong khu này! Vui lòng đặt mã khác.`);
+        return;
+      }
+    }
 
     const parseNum = (val: number | string | undefined, fallback?: number) => {
       if (val === '' || val === undefined || val === null) return fallback;
@@ -163,9 +175,9 @@ export const EditCageModal: React.FC<EditCageModalProps> = ({
       partnerCageCode: (formData.status === 'ghep_doi' || formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_cai') ? formData.partnerCageCode : undefined,
       
       // Tách đực / tách cái
-      matingSeparationDate: (formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_cai') ? formData.matingSeparationDate : undefined,
-      followupDurationDays: (formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_cai') ? parseNum(formData.followupDurationDays, 10) : undefined,
-      expectedEvaluationDate: (formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_cai') ? formData.expectedEvaluationDate : undefined,
+      matingSeparationDate: (formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_duc_khong_ro' || formData.status === 'moi_tach_cai') ? formData.matingSeparationDate : undefined,
+      followupDurationDays: (formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_duc_khong_ro' || formData.status === 'moi_tach_cai') ? parseNum(formData.followupDurationDays, 10) : undefined,
+      expectedEvaluationDate: (formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_duc_khong_ro' || formData.status === 'moi_tach_cai') ? formData.expectedEvaluationDate : undefined,
       
       // Tách con
       weaningDate: formData.status === 'moi_tach_con' ? formData.weaningDate : undefined,
@@ -277,7 +289,88 @@ export const EditCageModal: React.FC<EditCageModalProps> = ({
       }
     }
 
-    onSave(normalizeFarmCage(updatedCage), updatedBabyCage);
+    // ĐỒNG BỘ HAI CHIỀU KHI GHÉP ĐÔI
+    let secondCageUpdate: FarmCage | undefined = updatedBabyCage;
+    if (formData.status === 'ghep_doi' && formData.partnerCageCode) {
+      const partnerMatches = allCages.filter(c => c.code.trim().toUpperCase() === formData.partnerCageCode?.trim().toUpperCase() && c.id !== cage.id);
+      const partner = partnerMatches.find(c => c.status !== 'trong') || partnerMatches[0];
+      if (partner) {
+        const isPartnerFemale = partner.gender === 'cai' || partner.code.toUpperCase().startsWith('DC') || (partner.rowCode || '').toUpperCase().startsWith('DC');
+        const isCurrentMale = cage.gender === 'duc' || cage.code.toUpperCase().startsWith('DĐ') || (cage.rowCode || '').toUpperCase().startsWith('DĐ');
+        const pairDate = formData.matingDate || todayStr;
+
+        if (isCurrentMale || !isPartnerFemale) {
+          // Ô Đực giữ cặp ghép (2 con)
+          updatedCage.status = 'ghep_doi';
+          updatedCage.statusLabel = 'Ghép đôi';
+          updatedCage.gender = 'duc';
+          updatedCage.ratCount = 2;
+          updatedCage.partnerCageId = partner.id;
+          updatedCage.partnerCageCode = partner.code;
+          updatedCage.matingDate = pairDate;
+
+          // Ô Cái chuyển sang ô Đực -> Về Trống (0 con)
+          secondCageUpdate = normalizeFarmCage({
+            ...partner,
+            status: 'trong',
+            statusLabel: 'Trống do chuyển ghép',
+            gender: 'cai',
+            ratCount: 0,
+            matingDate: pairDate,
+            partnerCageId: updatedCage.id,
+            partnerCageCode: updatedCage.code,
+            notes: `Dúi cái đã chuyển sang ghép đôi tại Ô Đực ${updatedCage.code} từ ngày ${formatDateVN(pairDate)}. Lịch tách ghép: +20 ngày.`,
+            history: [
+              {
+                id: `his-${Date.now()}-pair`,
+                timestamp: `${todayStr} ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`,
+                eventType: 'ghep_doi',
+                summary: `Dúi cái đã chuyển sang ghép đôi tại Ô Đực ${updatedCage.code} từ ngày ${formatDateVN(pairDate)}. Ô cái tạm thời để trống trong thời gian phối giống. Lịch tách ghép dự kiến: +20 ngày (${formatDateVN(addDays(pairDate, 20))}).`,
+                relatedCageCode: updatedCage.code,
+                actor: 'Phan Dũng'
+              },
+              ...(partner.history || [])
+            ]
+          });
+        } else {
+          // Người dùng đang thao tác tại Ô Cái và ghép vào Ô Đực đối tác:
+          // Ô Cái chuyển sang Ô Đực -> Về Trống (0 con)
+          updatedCage.status = 'trong';
+          updatedCage.statusLabel = 'Trống do chuyển ghép';
+          updatedCage.gender = 'cai';
+          updatedCage.ratCount = 0;
+          updatedCage.partnerCageId = partner.id;
+          updatedCage.partnerCageCode = partner.code;
+          updatedCage.matingDate = pairDate;
+          updatedCage.notes = `Dúi cái đã chuyển sang ghép đôi tại Ô Đực ${partner.code} từ ngày ${formatDateVN(pairDate)}. Lịch tách ghép: +20 ngày.`;
+
+          // Ô Đực giữ cặp ghép (2 con)
+          secondCageUpdate = normalizeFarmCage({
+            ...partner,
+            status: 'ghep_doi',
+            statusLabel: 'Ghép đôi',
+            gender: 'duc',
+            ratCount: 2,
+            matingDate: pairDate,
+            partnerCageId: updatedCage.id,
+            partnerCageCode: updatedCage.code,
+            history: [
+              {
+                id: `his-${Date.now()}-pair`,
+                timestamp: `${todayStr} ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`,
+                eventType: 'ghep_doi',
+                summary: `Bắt đầu ghép đôi: Dúi Cái từ Ô ${updatedCage.code} đã chuyển sang ở cùng tại Ô Đực này từ ngày ${formatDateVN(pairDate)}. Lịch tách ghép dự kiến: +20 ngày (${formatDateVN(addDays(pairDate, 20))}).`,
+                relatedCageCode: updatedCage.code,
+                actor: 'Phan Dũng'
+              },
+              ...(partner.history || [])
+            ]
+          });
+        }
+      }
+    }
+
+    onSave(normalizeFarmCage(updatedCage), secondCageUpdate);
   };
 
   return (
@@ -320,11 +413,19 @@ export const EditCageModal: React.FC<EditCageModalProps> = ({
                 type="text"
                 required
                 value={cageCode}
-                onChange={e => setCageCode(e.target.value)}
+                onChange={e => {
+                  setCageCode(e.target.value);
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 placeholder="VD: C1-01, D1-01, SS1-01, Ô 01..."
                 className="w-full px-3.5 py-2 rounded-xl border border-emerald-400 bg-white font-mono font-black text-emerald-950 text-base shadow-2xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-hidden"
               />
             </div>
+            {errorMessage && (
+              <div className="p-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+                {errorMessage}
+              </div>
+            )}
             <p className="text-[11px] text-emerald-700 flex items-center justify-between">
               <span>💡 Bạn có thể chỉnh sửa tên/mã ô tùy ý để dễ dàng quản lý</span>
               <span className="text-[10px] text-slate-500">Vị trí: {cage.slotNumber || 'V1'}</span>
@@ -347,7 +448,20 @@ export const EditCageModal: React.FC<EditCageModalProps> = ({
                 const newStatus = e.target.value as CageStatus;
                 handleFormDataChange({ 
                   status: newStatus,
-                  ratCount: newStatus === 'trong' ? 0 : (newStatus === 'ghep_doi' ? 2 : Math.max(1, formData.ratCount))
+                  ratCount: newStatus === 'trong' ? 0 : (newStatus === 'ghep_doi' ? 2 : (cage.areaKind === 'sinh_san' ? 1 : Math.max(1, formData.ratCount))),
+                  // Không gán mặc định ô đối ứng khi chuyển sang trạng thái ghép đôi nếu trước đó chưa có
+                  ...(newStatus === 'ghep_doi' && !cage.partnerCageCode ? { partnerCageCode: '' } : {}),
+                  ...(newStatus === 'moi_tach_duc_khong_ro' ? {
+                    gender: 'cai',
+                    partnerCageCode: '',
+                    followupDurationDays: formData.followupDurationDays || 60,
+                    matingSeparationDate: formData.matingSeparationDate || todayStr,
+                    expectedEvaluationDate: formData.expectedEvaluationDate || (() => {
+                      const d = new Date(formData.matingSeparationDate || todayStr);
+                      d.setDate(d.getDate() + 60);
+                      return d.toISOString().split('T')[0];
+                    })()
+                  } : {})
                 });
               }}
               className="w-full px-3 py-2.5 rounded-xl border border-emerald-400 bg-white font-bold text-emerald-950 text-sm shadow-2xs"
@@ -367,6 +481,10 @@ export const EditCageModal: React.FC<EditCageModalProps> = ({
             onChange={handleFormDataChange}
             existingCages={allCages}
             allAreas={allAreas}
+            currentCageId={cage.id}
+            currentAreaId={cage.areaId}
+            currentCageCode={cage.code}
+            currentCageGender={formData.gender || cage.gender}
           />
 
           {/* Vị trí V1, V2... & Tầng */}

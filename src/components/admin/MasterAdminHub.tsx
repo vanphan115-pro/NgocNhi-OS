@@ -23,7 +23,8 @@ import {
   Home,
   XCircle,
   RotateCcw,
-  AlertTriangle
+  AlertTriangle,
+  QrCode
 } from 'lucide-react';
 import { 
   AppView, 
@@ -33,7 +34,8 @@ import {
   TableBooking, 
   TableBookingStatus, 
   WeddingInquiry, 
-  WeddingStatus 
+  WeddingStatus,
+  AIDecisionRequest
 } from '../../types';
 import { 
   resolveMenuItemAvailability, 
@@ -41,6 +43,7 @@ import {
   checkIsDuiDish 
 } from '../../data/inventoryHelper';
 import { BookingActionSyncPanel } from './BookingActionSyncPanel';
+import { subscribeToDecisions, updateDecisionStatus } from '../../services/aiDecisionService';
 
 const ORDER_REJECTION_REASONS = [
   'Tạm hết món ăn hoặc nguyên liệu tươi khách yêu cầu',
@@ -59,9 +62,10 @@ interface MasterAdminHubProps {
   onUpdateOrderStatus: (orderId: string, status: RestaurantOrderStatus, additionalData?: Partial<RestaurantOrder>) => void;
   onUpdateBookingStatus: (bookingId: string, status: TableBookingStatus, additionalData?: Partial<TableBooking>) => void;
   onUpdateWeddingStatus: (inquiryId: string, status: WeddingStatus) => void;
+  onOpenSystemQR?: () => void;
 }
 
-export type AdminManagementTab = 'orders' | 'bookings' | 'weddings' | 'menu';
+export type AdminManagementTab = 'orders' | 'bookings' | 'weddings' | 'menu' | 'ai_decisions';
 
 export const MasterAdminHub: React.FC<MasterAdminHubProps> = ({
   orders: initialOrders,
@@ -71,6 +75,7 @@ export const MasterAdminHub: React.FC<MasterAdminHubProps> = ({
   onUpdateOrderStatus,
   onUpdateBookingStatus,
   onUpdateWeddingStatus,
+  onOpenSystemQR,
 }) => {
   // Local state that synchronizes with props and localStorage
   const [orders, setOrders] = useState<RestaurantOrder[]>(() => {
@@ -137,6 +142,20 @@ export const MasterAdminHub: React.FC<MasterAdminHubProps> = ({
     return [];
   });
   const [commercialInventory, setCommercialInventory] = useState(getCommercialDuiInventory());
+
+  // AI Decisions & Order Closing Approvals (For Administrator Phan Dung)
+  const [aiDecisions, setAiDecisions] = useState<AIDecisionRequest[]>([]);
+  const [decisionNotes, setDecisionNotes] = useState<{ [id: string]: string }>({});
+  const [decisionModuleFilter, setDecisionModuleFilter] = useState<'all' | 'farm' | 'restaurant' | 'wedding'>('all');
+
+  useEffect(() => {
+    const unsub = subscribeToDecisions((list) => {
+      setAiDecisions(list);
+    });
+    return () => unsub();
+  }, []);
+
+  const pendingDecisionsCount = aiDecisions.filter(d => d.status === 'pending').length;
 
   // Toggle dish availability directly from Admin Hub
   const handleToggleDishAvailability = (dishId: string) => {
@@ -347,23 +366,38 @@ export const MasterAdminHub: React.FC<MasterAdminHubProps> = ({
     <div className="pt-2 space-y-3 w-full animate-fadeIn">
       {/* Admin Status Live Indicator Banner */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 text-amber-400 text-xs font-bold shadow-sm">
-          <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-          <span>BẢNG ĐIỀU HÀNH QUẢN TRỊ VIÊN</span>
-          <span className="flex h-2 w-2 relative ml-1">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-          </span>
-          <span className="text-[10px] text-emerald-400 font-medium">Đồng bộ trực tiếp</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 text-amber-400 text-xs font-bold shadow-sm">
+            <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+            <span>BẢNG ĐIỀU HÀNH QUẢN TRỊ VIÊN</span>
+            <span className="flex h-2 w-2 relative ml-1">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span className="text-[10px] text-emerald-400 font-medium">Đồng bộ trực tiếp</span>
+          </div>
+
+          {onOpenSystemQR && (
+            <button
+              type="button"
+              onClick={onOpenSystemQR}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold transition-all shadow-2xs cursor-pointer hover:scale-105"
+              title="Xem & in mã QR Tổng của toàn bộ Hệ thống Dịch vụ Ngọc Nhi"
+            >
+              <QrCode className="w-3.5 h-3.5 text-amber-700" />
+              <span>01 QR Tổng Hệ Thống</span>
+            </button>
+          )}
         </div>
+
         <div className="text-[11px] text-slate-600 font-medium flex items-center gap-1.5">
           <RotateCw className="w-3 h-3 text-slate-400" />
           <span>Tự động cập nhật tức thì khi khách đặt</span>
         </div>
       </div>
 
-      {/* 3 Dedicated Management Cards replacing the customer buttons */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* 4 Dedicated Management Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {/* 1. Quản lý đơn đặt hàng online */}
         <div
           onClick={() => {
@@ -478,6 +512,45 @@ export const MasterAdminHub: React.FC<MasterAdminHubProps> = ({
           <div className="mt-2.5 pt-2 border-t border-rose-100 flex items-center justify-between text-[10px] text-rose-800 font-bold">
             <span>Mở danh sách tiệc cưới & sảnh</span>
             <span className="underline">Chi tiết →</span>
+          </div>
+        </div>
+
+        {/* 4. Duyệt Chốt Đơn & Quyết Định AI (Anh Phan Dũng) */}
+        <div
+          onClick={() => {
+            setActiveModalTab('ai_decisions');
+            setSearchQuery('');
+            setStatusFilter('all');
+          }}
+          className="p-4 rounded-2xl bg-white hover:bg-purple-50/40 border-2 border-purple-300/90 hover:border-purple-500 shadow-md hover:shadow-lg transition-all cursor-pointer group text-left relative overflow-hidden"
+        >
+          <div className="flex items-center justify-between mb-2.5">
+            <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-800 flex items-center justify-center font-bold group-hover:scale-110 transition-transform">
+              <ShieldCheck className="w-5 h-5 text-purple-700" />
+            </div>
+            {pendingDecisionsCount > 0 ? (
+              <span className="px-2.5 py-1 rounded-full bg-purple-600 text-white text-[11px] font-black animate-pulse flex items-center gap-1.5 shadow-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                {pendingDecisionsCount} cần duyệt
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-bold">
+                {aiDecisions.length} hồ sơ
+              </span>
+            )}
+          </div>
+          <h4 className="text-sm font-extrabold text-slate-900 group-hover:text-purple-900 transition-colors flex items-center justify-between">
+            <span>Duyệt chốt đơn AI</span>
+            <ArrowRight className="w-4 h-4 text-purple-600 opacity-0 group-hover:opacity-100 -translate-x-1 group-hover:translate-x-0 transition-all" />
+          </h4>
+          <p className="text-[11px] text-slate-600 mt-1 font-medium line-clamp-1">
+            {pendingDecisionsCount > 0 
+              ? `⚡ ${pendingDecisionsCount} yêu cầu chốt đơn / nghiệp vụ chờ Anh Dũng` 
+              : `${aiDecisions.length} yêu cầu tư vấn AI đã tiếp nhận`}
+          </p>
+          <div className="mt-2.5 pt-2 border-t border-purple-100 flex items-center justify-between text-[10px] text-purple-800 font-bold">
+            <span>Quản trị viên Phan Dũng</span>
+            <span className="underline">Xem & Duyệt →</span>
           </div>
         </div>
       </div>
@@ -655,6 +728,27 @@ export const MasterAdminHub: React.FC<MasterAdminHubProps> = ({
                   {outOfStockDishesCount > 0 ? `${outOfStockDishesCount} tạm hết` : `${menuItems.length} món`}
                 </span>
               </button>
+
+              <button
+                onClick={() => {
+                  setActiveModalTab('ai_decisions');
+                  setStatusFilter('all');
+                  setSearchQuery('');
+                }}
+                className={`py-3.5 px-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 whitespace-nowrap transition-all ${
+                  activeModalTab === 'ai_decisions'
+                    ? 'border-purple-600 text-purple-900 bg-purple-50/50'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <ShieldCheck className="w-4 h-4 text-purple-600" />
+                <span>5. Duyệt chốt đơn & Nghiệp vụ AI</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  pendingDecisionsCount > 0 ? 'bg-purple-600 text-white animate-pulse' : 'bg-slate-100 text-slate-700'
+                }`}>
+                  {pendingDecisionsCount > 0 ? `${pendingDecisionsCount} chờ duyệt` : `${aiDecisions.length}`}
+                </span>
+              </button>
             </div>
 
             {/* Filter and Search Bar */}
@@ -670,6 +764,8 @@ export const MasterAdminHub: React.FC<MasterAdminHubProps> = ({
                       ? 'Tìm theo tên khách, SĐT, mã bàn #NN-TB-...'
                       : activeModalTab === 'weddings'
                       ? 'Tìm theo tên khách, SĐT, mã tiệc #WD-...'
+                      : activeModalTab === 'ai_decisions'
+                      ? 'Tìm theo tên khách, SĐT, mã yêu cầu #DEC-...'
                       : 'Tìm theo tên món ăn...'
                   }
                   value={searchQuery}
@@ -812,6 +908,51 @@ export const MasterAdminHub: React.FC<MasterAdminHubProps> = ({
                       }`}
                     >
                       Đã hoàn tất
+                    </button>
+                  </>
+                )}
+
+                {activeModalTab === 'ai_decisions' && (
+                  <>
+                    <button
+                      onClick={() => setStatusFilter('pending')}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
+                        statusFilter === 'pending'
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-white text-purple-800 border border-purple-200 hover:bg-purple-50'
+                      }`}
+                    >
+                      Chờ Anh Dũng duyệt ({pendingDecisionsCount})
+                    </button>
+                    <button
+                      onClick={() => setStatusFilter('approved')}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
+                        statusFilter === 'approved'
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-50'
+                      }`}
+                    >
+                      Đã duyệt chốt đơn
+                    </button>
+                    <button
+                      onClick={() => setStatusFilter('contacted')}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
+                        statusFilter === 'contacted'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white text-blue-800 border border-blue-200 hover:bg-blue-50'
+                      }`}
+                    >
+                      Đã liên hệ khách
+                    </button>
+                    <button
+                      onClick={() => setStatusFilter('rejected')}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
+                        statusFilter === 'rejected'
+                          ? 'bg-slate-700 text-white'
+                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Từ chối
                     </button>
                   </>
                 )}
@@ -1473,6 +1614,315 @@ export const MasterAdminHub: React.FC<MasterAdminHubProps> = ({
                             >
                               {isAvailable ? 'Báo tạm hết' : 'Mở bán lại'}
                             </button>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* ==================================================== */}
+              {/* TAB 5: DUYỆT CHỐT ĐƠN & QUYẾT ĐỊNH NGHIỆP VỤ AI */}
+              {/* ==================================================== */}
+              {activeModalTab === 'ai_decisions' && (
+                <div className="space-y-4">
+                  {/* Explanatory Banner */}
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white shadow-md border border-purple-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-400/40 text-purple-300 flex items-center justify-center shrink-0">
+                        <ShieldCheck className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h5 className="text-xs sm:text-sm font-bold text-white">
+                            Trung Tâm Duyệt Quyết Định Nghiệp Vụ & Chốt Đơn Của AI
+                          </h5>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/30 text-purple-200 border border-purple-400/30 font-bold">
+                            Chỉ định: Anh Phan Dũng
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-purple-200/90 mt-0.5">
+                          Trợ lý ảo AI tự động tra cứu dữ liệu & mạng để trả lời tư vấn thay quản trị viên. Mọi yêu cầu chốt đơn, con giống, đặt cọc tiệc cưới hoặc chính sách giá đều được chuyển trực tiếp về đây để xin ý kiến của Anh.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Module Filter Chips */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                    <span className="text-xs font-bold text-slate-500 mr-1 flex items-center gap-1">
+                      <SlidersHorizontal className="w-3.5 h-3.5" />
+                      Phân hệ:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setDecisionModuleFilter('all')}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                        decisionModuleFilter === 'all'
+                          ? 'bg-purple-700 text-white shadow-xs'
+                          : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Tất cả ({aiDecisions.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDecisionModuleFilter('farm')}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                        decisionModuleFilter === 'farm'
+                          ? 'bg-orange-600 text-white shadow-xs'
+                          : 'bg-white text-orange-800 border border-orange-200 hover:bg-orange-50'
+                      }`}
+                    >
+                      🦔 Trại Dúi ({aiDecisions.filter(d => d.module === 'farm').length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDecisionModuleFilter('restaurant')}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                        decisionModuleFilter === 'restaurant'
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'bg-white text-amber-800 border border-amber-200 hover:bg-amber-50'
+                      }`}
+                    >
+                      🍲 Quán Ăn ({aiDecisions.filter(d => d.module === 'restaurant').length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDecisionModuleFilter('wedding')}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                        decisionModuleFilter === 'wedding'
+                          ? 'bg-rose-600 text-white shadow-xs'
+                          : 'bg-white text-rose-800 border border-rose-200 hover:bg-rose-50'
+                      }`}
+                    >
+                      💍 Tiệc Cưới ({aiDecisions.filter(d => d.module === 'wedding').length})
+                    </button>
+                  </div>
+
+                  {/* List of Decision Requests */}
+                  <div className="space-y-3">
+                    {(() => {
+                      const filtered = aiDecisions.filter(d => {
+                        const matchModule = decisionModuleFilter === 'all' || d.module === decisionModuleFilter;
+                        const matchStatus = statusFilter === 'all' || d.status === statusFilter;
+                        const matchQuery = 
+                          d.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          d.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          d.phone.includes(searchQuery) ||
+                          d.summary.toLowerCase().includes(searchQuery.toLowerCase());
+                        return matchModule && matchStatus && matchQuery;
+                      });
+
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="p-8 text-center bg-white rounded-2xl border border-dashed border-slate-300 text-slate-500">
+                            <ShieldCheck className="w-10 h-10 mx-auto mb-2 text-slate-400" />
+                            <p className="font-bold text-slate-700">Chưa có yêu cầu nào trong danh mục này</p>
+                            <p className="text-xs text-slate-500 mt-1">
+                              Khi khách hàng trò chuyện với Trợ lý AI và có ý định chốt đơn, hệ thống sẽ tự động tổng hợp hồ sơ và hiển thị tại đây.
+                            </p>
+                          </div>
+                        );
+                      }
+
+                      return filtered.map(item => {
+                        const rawPhone = item.phone.replace(/\D/g, '');
+                        const noteVal = decisionNotes[item.id] !== undefined ? decisionNotes[item.id] : (item.adminNote || '');
+
+                        return (
+                          <div 
+                            key={item.id}
+                            className={`p-4 rounded-2xl border transition-all bg-white shadow-xs ${
+                              item.status === 'pending'
+                                ? 'border-purple-300 ring-2 ring-purple-100'
+                                : item.status === 'approved'
+                                ? 'border-emerald-200 bg-emerald-50/20'
+                                : 'border-slate-200'
+                            }`}
+                          >
+                            {/* Card Top Header */}
+                            <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-0.5 rounded-md text-[11px] font-extrabold uppercase tracking-wide border ${
+                                  item.module === 'farm'
+                                    ? 'bg-orange-100 text-orange-800 border-orange-200'
+                                    : item.module === 'wedding'
+                                    ? 'bg-rose-100 text-rose-800 border-rose-200'
+                                    : 'bg-amber-100 text-amber-800 border-amber-200'
+                                }`}>
+                                  {item.module === 'farm' ? '🦔 Trại Dúi KaKa' : item.module === 'wedding' ? '💍 Tiệc Cưới Ngọc Nhi' : '🍲 Quán Ăn Ngọc Nhi'}
+                                </span>
+                                <span className="font-mono font-bold text-xs text-slate-900">
+                                  #{item.code}
+                                </span>
+                                <span className="text-[11px] text-slate-400">
+                                  • {item.createdAt}
+                                </span>
+                              </div>
+
+                              {/* Status Badge */}
+                              <div>
+                                {item.status === 'pending' && (
+                                  <span className="px-2.5 py-1 rounded-full bg-purple-100 text-purple-900 border border-purple-300 text-[11px] font-black flex items-center gap-1 animate-pulse">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-purple-600 animate-ping" />
+                                    ⏳ Chờ Anh Phan Dũng Duyệt
+                                  </span>
+                                )}
+                                {item.status === 'approved' && (
+                                  <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] font-extrabold flex items-center gap-1">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                    ✅ Đã Duyệt Chốt Đơn
+                                  </span>
+                                )}
+                                {item.status === 'contacted' && (
+                                  <span className="px-2.5 py-1 rounded-full bg-blue-100 text-blue-900 border border-blue-300 text-[11px] font-extrabold flex items-center gap-1">
+                                    <Phone className="w-3.5 h-3.5 text-blue-600" />
+                                    📞 Đã Liên Hệ Khách
+                                  </span>
+                                )}
+                                {item.status === 'rejected' && (
+                                  <span className="px-2.5 py-1 rounded-full bg-slate-200 text-slate-700 border border-slate-300 text-[11px] font-bold flex items-center gap-1">
+                                    <XCircle className="w-3.5 h-3.5 text-slate-500" />
+                                    Đã từ chối
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Customer Information & Actions */}
+                            <div className="py-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                              {/* Customer Contact */}
+                              <div className="space-y-1">
+                                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                                  Khách hàng liên hệ
+                                </p>
+                                <h4 className="font-extrabold text-sm text-slate-900">
+                                  {item.customerName}
+                                </h4>
+                                <div className="flex items-center gap-2 pt-1">
+                                  {rawPhone ? (
+                                    <>
+                                      <a
+                                        href={`tel:${rawPhone}`}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-2xs transition-colors"
+                                        title="Bấm gọi số khách"
+                                      >
+                                        <Phone className="w-3 h-3" />
+                                        <span>{item.phone}</span>
+                                      </a>
+                                      <a
+                                        href={`https://zalo.me/${rawPhone}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-2xs transition-colors"
+                                        title="Nhắn tin Zalo"
+                                      >
+                                        <span>Zalo</span>
+                                        <ExternalLink className="w-2.5 h-2.5 opacity-80" />
+                                      </a>
+                                    </>
+                                  ) : (
+                                    <span className="text-xs text-slate-500 italic">
+                                      Chưa để lại số điện thoại (qua chat trực tiếp)
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Order & Decision Content */}
+                              <div className="md:col-span-2 space-y-1 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                    Tóm tắt nhu cầu do AI ghi nhận:
+                                  </p>
+                                  {item.estimatedValue ? (
+                                    <span className="text-xs font-bold text-emerald-700 font-mono">
+                                      Ước tính: {item.estimatedValue.toLocaleString('vi-VN')}đ
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <p className="font-bold text-slate-900 text-xs sm:text-sm">
+                                  {item.summary}
+                                </p>
+                                {item.customerMessage && item.customerMessage !== item.summary && (
+                                  <p className="text-[11.5px] text-slate-600 italic pt-1 border-t border-slate-200/60 mt-1.5">
+                                    "{item.customerMessage}"
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Admin Note and Actions Bar */}
+                            <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+                              {/* Admin note input */}
+                              <div className="flex-1">
+                                <input
+                                  type="text"
+                                  placeholder="Ghi chú của Anh Phan Dũng (VD: Đã chốt 5 cặp 3-4 lạng, hẹn thứ 7 ship...)"
+                                  value={noteVal}
+                                  onChange={(e) => {
+                                    setDecisionNotes(prev => ({ ...prev, [item.id]: e.target.value }));
+                                  }}
+                                  className="w-full px-3 py-1.5 text-xs bg-slate-50 rounded-lg border border-slate-200 focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 text-slate-800"
+                                />
+                              </div>
+
+                              {/* Approval Action Buttons */}
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {item.status !== 'approved' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateDecisionStatus(item.id, 'approved', noteVal || 'Đã duyệt chốt đơn thành công');
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    <span>Duyệt chốt đơn</span>
+                                  </button>
+                                )}
+
+                                {item.status !== 'contacted' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateDecisionStatus(item.id, 'contacted', noteVal || 'Đã liên hệ trao đổi với khách');
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                  >
+                                    <Phone className="w-3 h-3" />
+                                    <span>Đã liên hệ</span>
+                                  </button>
+                                )}
+
+                                {item.status !== 'rejected' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateDecisionStatus(item.id, 'rejected', noteVal || 'Từ chối / Chưa đáp ứng');
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+                                  >
+                                    <span>Từ chối</span>
+                                  </button>
+                                )}
+
+                                {item.status !== 'pending' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateDecisionStatus(item.id, 'pending', noteVal);
+                                    }}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-xs transition-colors"
+                                    title="Chuyển lại về trạng thái Chờ duyệt"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         );
                       });

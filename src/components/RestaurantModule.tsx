@@ -78,7 +78,52 @@ import {
   Bell
 } from 'lucide-react';
 import { triggerAdminNotification } from '../utils/notificationSound';
+import { createDecisionRequest, getLocalDecisions, subscribeToDecisions } from '../services/aiDecisionService';
+import { AIDecisionRequest } from '../types';
 import { TableBookingModal } from './TableBookingModal';
+import { ModuleChatWidget, QuickPrompt } from './chat/ModuleChatWidget';
+
+const RESTAURANT_QUICK_PROMPTS: QuickPrompt[] = [
+  {
+    label: '🍖 Đặc sản Dúi tươi sống',
+    question: 'Quán có những món đặc sản Dúi nào ngon nhất?',
+    answer: 'Ngọc Nhi nổi tiếng với Dúi tươi sống bắt tại chuồng:\n• Dúi nướng mọi / muối ớt thơm lừng\n• Dúi xào lăn nước cốt dừa béo ngậy\n• Dúi hấp lá tía tô giữ trọn vị ngọt thanh\n• Rượu tiết dúi / mật dúi tráng dương bồi bổ sức khỏe.'
+  },
+  {
+    label: '🪑 Đặt bàn tiệc trước',
+    question: 'Tôi muốn đặt bàn tiệc cho nhóm gia đình/bạn bè thì làm sao?',
+    answer: 'Quý khách có thể bấm nút "Mở form đặt bàn nhanh" ngay phía trên hoặc liên hệ Hotline 0967.823.801 để chọn phòng VIP riêng tư hoặc không gian sảnh tiệc sân vườn thoáng mát.'
+  },
+  {
+    label: '🚗 Giao món tận nơi',
+    question: 'Quán có nhận giao món ăn đóng hộp mang về tận nhà không?',
+    answer: 'Quán có nhận giao hàng tận nơi qua hotline 0967.823.801. Món ăn được đóng hộp giữ nhiệt chuyên dụng, đảm bảo nóng sốt và chuẩn vị như thưởng thức tại quán!'
+  },
+  {
+    label: '🍲 Món lẩu & nướng đặc sản',
+    question: 'Thực đơn lẩu và nướng tại quán có những món gì?',
+    answer: 'Quán phục vụ đa dạng: Lẩu Dúi lá giang chua cay, Lẩu gà ta tiềm ớt hiểm, Lẩu cá lăng măng chua, Cá lăng nướng muối ớt và các món nướng than hoa thơm nức.'
+  },
+  {
+    label: '📍 Địa chỉ & Giờ mở cửa',
+    question: 'Quán mở cửa từ mấy giờ và địa chỉ chính xác ở đâu?',
+    answer: 'Quán Ăn Ngọc Nhi mở cửa phục vụ từ 09:00 đến 22:30 tất cả các ngày trong tuần tại:\n📍 Khu phố 9, phường Lộc Ninh, TP. Đồng Nai.\n📞 Hotline đặt bàn: 0967.823.801 - 0969.310.601.'
+  }
+];
+
+const handleRestaurantChatResponse = (text: string): string | null => {
+  const lower = text.toLowerCase();
+  if (lower.includes('dúi') || lower.includes('đặc sản') || lower.includes('món ngon')) {
+    return `Đặc sản Dúi tại Ngọc Nhi được chế biến từ dúi tươi sống tuyển chọn từ Trại Dúi KaKa:\n• Dúi nướng mọi / muối ớt\n• Dúi xào lăn ăn kèm bánh mì\n• Dúi hấp lá tía tô\n• Dúi om măng chua cay\nQuý khách muốn đặt món nào trước để bếp chuẩn bị nóng sốt ạ?`;
+  }
+  if (lower.includes('bàn') || lower.includes('đặt chỗ') || lower.includes('giữ chỗ') || lower.includes('phòng vip')) {
+    return `Quán có sẵn phòng VIP máy lạnh riêng tư và sảnh tiệc sân vườn rộng thoáng.\nQuý khách có thể bấm nút "Mở form đặt bàn nhanh" ở phía trên khung chat để gửi thông tin giữ bàn ngay nhé!`;
+  }
+  if (lower.includes('giờ') || lower.includes('mở cửa') || lower.includes('địa chỉ') || lower.includes('ở đâu')) {
+    return `Quán Ăn Ngọc Nhi phục vụ từ 09:00 - 22:30 mỗi ngày.\n📍 Địa chỉ: Khu phố 9, phường Lộc Ninh, TP. Đồng Nai.\n📞 Hotline hỗ trợ: 0967.823.801 - 0969.310.601.`;
+  }
+  return null;
+};
 
 // Curated culinary images for quick one-click replacement
 const CURATED_DISH_IMAGES = [
@@ -207,6 +252,18 @@ export const RestaurantModule: React.FC<RestaurantModuleProps> = ({
     return [];
   });
 
+  // Track pending decisions for restaurant module
+  const [restaurantPendingDecisions, setRestaurantPendingDecisions] = useState<AIDecisionRequest[]>(() => {
+    return getLocalDecisions().filter(d => d.module === 'restaurant' && d.status === 'pending');
+  });
+
+  useEffect(() => {
+    const unsub = subscribeToDecisions((all) => {
+      setRestaurantPendingDecisions(all.filter(d => d.module === 'restaurant' && d.status === 'pending'));
+    });
+    return unsub;
+  }, []);
+
   // Keep orders in sync with props
   useEffect(() => {
     if (propOrders) {
@@ -327,17 +384,6 @@ export const RestaurantModule: React.FC<RestaurantModuleProps> = ({
 
   // Map Modal
   const [showMapModal, setShowMapModal] = useState<boolean>(false);
-
-  // Chat Support Drawer / Modal
-  const [showChatModal, setShowChatModal] = useState<boolean>(false);
-  const [chatMessages, setChatMessages] = useState<Array<{ sender: 'user' | 'bot'; text: string; time: string }>>([
-    {
-      sender: 'bot',
-      text: 'Chào mừng quý khách đến với Quán Ăn Ngọc Nhi! Chúng tôi có đặc sản Dúi tươi sống chế biến theo yêu cầu và nhận đặt bàn tiệc. Quý khách cần hỗ trợ gì ạ?',
-      time: 'Vừa xong'
-    }
-  ]);
-  const [chatInput, setChatInput] = useState<string>('');
 
   // Manager Management Modals
   const [managerActiveTab, setManagerActiveTab] = useState<'orders' | 'bookings' | 'menu' | 'revenue' | null>(null);
@@ -936,6 +982,30 @@ export const RestaurantModule: React.FC<RestaurantModuleProps> = ({
       localStorage.setItem('nn_active_dui_quote', JSON.stringify(updated));
       setCustomerDecisionOrder(null);
       window.dispatchEvent(new CustomEvent('nn_data_sync'));
+
+      // Escalate to admin only after customer has confirmed decision
+      createDecisionRequest({
+        customerName: targetOrder.customerName || 'Khách quán ăn',
+        phone: targetOrder.phone || '',
+        module: 'restaurant',
+        decisionType: 'chot_ban_an',
+        title: `Khách đã chốt đặt món Dúi [${targetOrder.code}]`,
+        summary: `Khách ${targetOrder.customerName} (${targetOrder.phone}) đã bấm ĐỒNG Ý ĐẶT MÓN đơn #${targetOrder.code} (${(targetOrder.total || 0).toLocaleString('vi-VN')}đ). Chuyển quản trị viên phê duyệt.`,
+        customerMessage: `Khách đã xem báo giá cân dúi và bấm ĐỒNG Ý ĐẶT MÓN. Mã đơn: ${targetOrder.code}, SĐT: ${targetOrder.phone}`,
+        estimatedValue: targetOrder.total || 0
+      }).catch(console.error);
+
+      triggerAdminNotification({
+        id: `notif-confirmed-${targetOrder.id}`,
+        type: 'order',
+        title: 'CẢNH BÁO: Khách Đã Chốt Đặt Món',
+        message: `Khách ${targetOrder.customerName} (${targetOrder.phone}) đã chốt đơn #${targetOrder.code} (${(targetOrder.total || 0).toLocaleString('vi-VN')}đ). Vui lòng kiểm tra duyệt phục vụ.`,
+        code: targetOrder.code,
+        customerName: targetOrder.customerName,
+        phone: targetOrder.phone,
+        amount: targetOrder.total || 0,
+        view: 'restaurant'
+      });
     } else {
       // Khách chọn lại món -> Hủy báo giá hiện tại để khách chọn lại từ thực đơn
       const updated: RestaurantOrder = {
@@ -949,6 +1019,17 @@ export const RestaurantModule: React.FC<RestaurantModuleProps> = ({
       localStorage.removeItem('nn_active_dui_quote');
       setCustomerDecisionOrder(null);
       window.dispatchEvent(new CustomEvent('nn_data_sync'));
+
+      triggerAdminNotification({
+        id: `notif-reselect-${targetOrder.id}`,
+        type: 'order',
+        title: 'Khách Chọn Lại Món',
+        message: `Khách ${targetOrder.customerName} (${targetOrder.phone}) đã hủy báo giá đơn #${targetOrder.code} để chọn lại món.`,
+        code: targetOrder.code,
+        customerName: targetOrder.customerName,
+        phone: targetOrder.phone,
+        view: 'restaurant'
+      });
     }
   };
 
@@ -1394,6 +1475,47 @@ export const RestaurantModule: React.FC<RestaurantModuleProps> = ({
               </div>
             </div>
           </header>
+
+          {/* CẢNH BÁO QUÁN ĂN: KHI CÓ ĐƠN ĐẶT, BÀN MỚI HOẶC QUYẾT ĐỊNH CHỐT TỪ KHÁCH HÀNG */}
+          {(bookings.filter(b => b.status === 'new').length + orders.filter(o => o.status === 'pending' || o.status === 'waiting_weighing' || (o.status as string) === 'weighing_required').length + restaurantPendingDecisions.length) > 0 && (
+            <div className="rounded-2xl p-4 bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-amber-500/25 border-2 border-amber-500 text-slate-900 shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in duration-300">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shrink-0 shadow-sm animate-bounce">
+                  <Bell className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                    <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider animate-pulse">
+                      Cảnh Báo Quán Ăn
+                    </span>
+                    <span className="text-xs sm:text-sm font-extrabold text-slate-900">
+                      Có {bookings.filter(b => b.status === 'new').length + orders.filter(o => o.status === 'pending' || o.status === 'waiting_weighing' || (o.status as string) === 'weighing_required').length + restaurantPendingDecisions.length} yêu cầu chốt đặt / đơn món cần phê duyệt tiếp nhận
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-700 font-medium">
+                    Khách hàng đã xác nhận chốt đặt ({bookings.filter(b => b.status === 'new').length} bàn mới, {orders.filter(o => o.status === 'pending' || o.status === 'waiting_weighing').length} đơn món, {restaurantPendingDecisions.length} yêu cầu chốt). Vui lòng kiểm tra và duyệt phục vụ.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (orders.some(o => o.status === 'waiting_weighing')) {
+                      const firstWaiting = orders.find(o => o.status === 'waiting_weighing');
+                      if (firstWaiting) handleOpenAdminWeighing(firstWaiting);
+                    } else {
+                      setActiveNav('manager');
+                    }
+                  }}
+                  className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-sm flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                >
+                  <span>Xem & Duyệt Ngay</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Active Customer Booking Notification Banner */}
           {bookings && bookings.length > 0 && (
@@ -2712,17 +2834,6 @@ export const RestaurantModule: React.FC<RestaurantModuleProps> = ({
       </div>
 
       {/* ========================================================= */}
-      {/* FLOATING CHAT / TƯ VẤN BUTTON */}
-      {/* ========================================================= */}
-      <button
-        onClick={() => setShowChatModal(true)}
-        className="fixed bottom-6 right-6 z-40 px-4 py-3 rounded-full bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 text-white font-bold text-xs shadow-2xl flex items-center gap-2 transition-all hover:scale-105 active:scale-95 border-2 border-white/40"
-      >
-        <MessageCircle className="w-5 h-5 text-amber-200" />
-        <span className="hidden sm:inline">Chat Tư vấn</span>
-      </button>
-
-      {/* ========================================================= */}
       {/* MODAL: CHECKOUT / ĐẶT MÓN ONLINE */}
       {/* ========================================================= */}
       {showCheckoutModal && (
@@ -3375,72 +3486,23 @@ export const RestaurantModule: React.FC<RestaurantModuleProps> = ({
       )}
 
       {/* ========================================================= */}
-      {/* MODAL: LIVE CHAT TƯ VẤN */}
+      {/* FLOATING CHAT TƯ VẤN TRỰC TUYẾN PHÂN HỆ QUÁN ĂN */}
       {/* ========================================================= */}
-      {showChatModal && (
-        <div className="fixed bottom-6 right-6 z-50 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col h-[450px] animate-scaleUp">
-          <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-3.5 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ChefHat className="w-5 h-5 text-amber-200" />
-              <div>
-                <h4 className="text-xs font-bold text-white">Tư Vấn Quán Ăn Ngọc Nhi</h4>
-                <p className="text-[10px] text-amber-200">Trực tuyến hỗ trợ 24/7</p>
-              </div>
-            </div>
-            <button onClick={() => setShowChatModal(false)} className="text-white/80 hover:text-white">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="flex-1 p-3 overflow-y-auto space-y-2.5 bg-slate-50 text-xs">
-            {chatMessages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[80%] p-2.5 rounded-2xl ${
-                  msg.sender === 'user' ? 'bg-orange-600 text-white' : 'bg-white border border-slate-200 text-slate-800 shadow-xs'
-                }`}>
-                  <p>{msg.text}</p>
-                  <span className="text-[9px] opacity-70 block text-right mt-1">{msg.time}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="p-2.5 bg-white border-t border-slate-200 flex gap-2">
-            <input
-              type="text"
-              placeholder="Nhập tin nhắn..."
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && chatInput.trim()) {
-                  setChatMessages(prev => [
-                    ...prev,
-                    { sender: 'user', text: chatInput.trim(), time: 'Vừa xong' },
-                    { sender: 'bot', text: 'Cảm ơn quý khách! Chuyên viên nhà hàng sẽ liên hệ phản hồi qua hotline 0967 823 801 trong ít phút.', time: 'Vừa xong' }
-                  ]);
-                  setChatInput('');
-                }
-              }}
-              className="flex-1 px-3 py-1.5 text-xs bg-slate-100 rounded-xl border border-slate-200 focus:outline-hidden"
-            />
-            <button
-              onClick={() => {
-                if (chatInput.trim()) {
-                  setChatMessages(prev => [
-                    ...prev,
-                    { sender: 'user', text: chatInput.trim(), time: 'Vừa xong' },
-                    { sender: 'bot', text: 'Cảm ơn quý khách! Chuyên viên nhà hàng sẽ liên hệ phản hồi qua hotline 0967 823 801 trong ít phút.', time: 'Vừa xong' }
-                  ]);
-                  setChatInput('');
-                }
-              }}
-              className="px-3 py-1.5 rounded-xl bg-orange-600 text-white font-bold text-xs"
-            >
-              Gửi
-            </button>
-          </div>
-        </div>
-      )}
+      <ModuleChatWidget
+        module="restaurant"
+        title="Tư Vấn Quán Ăn Ngọc Nhi"
+        subtitle="Quản lý Ngọc Nhi • Hỗ trợ 24/7"
+        avatarIcon={<ChefHat className="w-5 h-5 text-amber-200" />}
+        headerGradientClass="bg-gradient-to-r from-orange-600 to-amber-600"
+        accentColorClass="bg-orange-600 hover:bg-orange-700"
+        hotline="0967823801"
+        hotlineFormatted="0967.823.801 - 0969.310.601"
+        initialMessage="Chào mừng quý khách đến với Quán Ăn Ngọc Nhi! Chúng tôi phục vụ đặc sản Dúi tươi sống bắt tại chuồng chế biến theo yêu cầu, các món lẩu nướng đồng quê và nhận đặt bàn tiệc. Quý khách cần hỗ trợ đặt bàn hoặc chọn món gì ạ?"
+        quickPrompts={RESTAURANT_QUICK_PROMPTS}
+        smartResponseHandler={handleRestaurantChatResponse}
+        onSpecialAction={() => setShowBookingModal(true)}
+        specialActionLabel="Mở form đặt bàn trước nhanh"
+      />
 
       {/* ========================================================= */}
       {/* MODAL: MANAGER ORDERS & BOOKINGS POPUP */}

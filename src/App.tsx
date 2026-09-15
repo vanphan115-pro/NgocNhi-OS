@@ -32,6 +32,7 @@ import { OperationsCenter } from './components/OperationsCenter';
 import { BookingLookupModal } from './components/BookingLookupModal';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { AdminToastAlert } from './components/AdminToastAlert';
+import { UniversalQRModal } from './components/farm/UniversalQRModal';
 import { AdminAlertPayload, triggerAdminNotification } from './utils/notificationSound';
 import { subscribeToOnlineDatabase, syncOnlinePayload, isOnlineSyncReady, SystemDataPayload } from './services/onlineSyncService';
 
@@ -65,6 +66,7 @@ export default function App() {
     return 'guest';
   });
   const [lookupModalOpen, setLookupModalOpen] = useState(false);
+  const [systemQRModalOpen, setSystemQRModalOpen] = useState(false);
   const [adminLoginModalOpen, setAdminLoginModalOpen] = useState(false);
   const [adminLoginReason, setAdminLoginReason] = useState<string>('');
 
@@ -740,6 +742,7 @@ export default function App() {
         onToggleRole={handleSetUserRole}
         onOpenLookupModal={() => setLookupModalOpen(true)}
         onOpenAdminLogin={handleOpenAdminLogin}
+        onOpenSystemQR={() => setSystemQRModalOpen(true)}
         pendingBookingsCount={pendingBookingsCount}
         pendingWeddingCount={pendingWeddingCount}
         notifications={adminNotifications}
@@ -855,6 +858,14 @@ export default function App() {
         }}
         requiredActionNote={adminLoginReason}
       />
+
+      {/* Universal System QR Modal (Cả Khách & Admin đều có thể mở trực tiếp từ Header) */}
+      {systemQRModalOpen && (
+        <UniversalQRModal
+          initialType="system"
+          onClose={() => setSystemQRModalOpen(false)}
+        />
+      )}
 
       {/* Unified Master Footer */}
       <Footer onNavigate={handleNavigate} userRole={userRole} />

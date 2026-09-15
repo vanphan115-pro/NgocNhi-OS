@@ -33,7 +33,8 @@ import {
   Edit3,
   Trash2,
   Lock,
-  Crown
+  Crown,
+  Clock
 } from 'lucide-react';
 import { EditCageModal } from './EditCageModal';
 
@@ -45,6 +46,7 @@ interface FarmCageProfileModalProps {
   onUpdateCage: (updatedCage: FarmCage, secondCageUpdate?: FarmCage) => void;
   onDeleteCage?: (cageId: string) => void;
   onOpenQR: (cage: FarmCage) => void;
+  onSelectCage?: (cage: FarmCage) => void;
   userRole?: UserRole;
   onOpenAdminLogin?: (reason?: string) => void;
 }
@@ -59,6 +61,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
   onUpdateCage,
   onDeleteCage,
   onOpenQR,
+  onSelectCage,
   userRole = 'guest',
   onOpenAdminLogin
 }) => {
@@ -82,6 +85,10 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
 
   // Form states cho Tách ghép
   const [separationDate, setSeparationDate] = useState<string>(new Date().toISOString().split('T')[0]);
+
+  // Form states cho Tách đực không rõ đực
+  const [unknownSepDate, setUnknownSepDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [showUnknownSepForm, setShowUnknownSepForm] = useState<boolean>(false);
 
   // Form states cho Sinh con
   const [birthDate, setBirthDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -117,13 +124,79 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
   const [deathCount, setDeathCount] = useState<number>(1);
   const [deathReason, setDeathReason] = useState<string>('Kiệt sức / không đáp ứng phác đồ');
 
-  // Danh sách các Ô gợi ý
-  const availablePartners = (allCages || []).filter(c => 
-    c.areaKind === 'sinh_san' && 
-    c.id !== cage.id && 
-    c.status === 'san_sang_ghep' &&
-    ((cage.gender === 'cai' && c.gender === 'duc') || (cage.gender === 'duc' && c.gender === 'cai'))
-  );
+  // Helper xác định giới tính ô
+  const isFemale = (c: { code?: string; gender?: string; rowCode?: string }) => {
+    if (c.gender === 'cai') return true;
+    const code = (c.code || '').toUpperCase();
+    const row = (c.rowCode || '').toUpperCase();
+    return code.startsWith('DC') || code.startsWith('C') || row.startsWith('DC') || row.startsWith('C') || code.includes('CAI');
+  };
+
+  const isMale = (c: { code?: string; gender?: string; rowCode?: string }) => {
+    if (c.gender === 'duc') return true;
+    const code = (c.code || '').toUpperCase();
+    const row = (c.rowCode || '').toUpperCase();
+    return code.startsWith('DĐ') || code.startsWith('DD') || (code.startsWith('D') && !code.startsWith('DC')) || row.startsWith('DĐ') || row.startsWith('DD') || (row.startsWith('D') && !row.startsWith('DC')) || code.includes('DUC');
+  };
+
+  const isCurrentFemale = isFemale(cage);
+  const isCurrentMale = isMale(cage);
+
+  // Danh sách các Ô gợi ý: Cùng khu vực, lọc chính xác theo yêu cầu người dùng:
+  // - Khi ở Ô Cái: CHỈ CẦN HIỆN Ô ĐỰC SẴN SÀNG GHÉP (TUYỆT ĐỐI KHÔNG HIỆN Ô TRỐNG)
+  // - Khi ở Ô Đực: CHỈ CẦN HIỆN Ô CÁI TRỐNG
+  const availablePartners = useMemo(() => {
+    const map = new Map<string, FarmCage>();
+    (allCages || []).forEach(c => {
+      const isSameArea = cage.areaId ? c.areaId === cage.areaId : c.areaKind === cage.areaKind;
+      if (!isSameArea || c.id === cage.id) return;
+
+      const codeKey = c.code.trim().toUpperCase();
+
+      if (isCurrentFemale) {
+        if (isMale(c) && c.status === 'san_sang_ghep') {
+          map.set(codeKey, c);
+        }
+        return;
+      }
+      if (isCurrentMale) {
+        if (isFemale(c) && c.status === 'trong') {
+          map.set(codeKey, c);
+        }
+        return;
+      }
+      if ((isMale(c) && c.status === 'san_sang_ghep') || (isFemale(c) && c.status === 'trong')) {
+        map.set(codeKey, c);
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) =>
+      a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' })
+    );
+  }, [allCages, cage.areaId, cage.areaKind, cage.id, isCurrentFemale, isCurrentMale]);
+
+  const partnerCage = useMemo(() => {
+    if (!cage.partnerCageCode && !cage.partnerCageId) return null;
+
+    // 1. Ưu tiên tìm theo partnerCageId
+    if (cage.partnerCageId) {
+      const byId = (allCages || []).find(c => c.id === cage.partnerCageId);
+      if (byId) return byId;
+    }
+
+    // 2. Tìm theo mã ô đối tác partnerCageCode
+    if (cage.partnerCageCode) {
+      const targetCode = cage.partnerCageCode.trim().toUpperCase();
+      const matches = (allCages || []).filter(c => c.code && c.code.trim().toUpperCase() === targetCode);
+      if (matches.length > 0) {
+        // Ưu tiên ô đang ghép đôi hoặc có dúi/lịch sử thay vì ô trống
+        const active = matches.find(c => c.status === 'ghep_doi' || c.status !== 'trong' || (c.ratCount || 0) > 0 || (c.history && c.history.length > 0));
+        if (active) return active;
+        return matches[0];
+      }
+    }
+    return null;
+  }, [cage.partnerCageId, cage.partnerCageCode, allCages]);
 
   const availableBabyCages = (allCages || []).filter(c => c.areaKind === 'baby');
   const availableTreatmentCages = (allCages || []).filter(c => c.areaKind === 'dieu_tri');
@@ -209,13 +282,15 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
 
     const todayStr = new Date().toISOString().split('T')[0];
     const timestampStr = `${todayStr} ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
+    const currentIsMale = isMale(cage);
 
-    // Ô hiện tại (Ví dụ Ô Cái)
-    const updatedCurrent: FarmCage = {
+    // Ô hiện tại
+    const updatedCurrent: FarmCage = currentIsMale ? {
+      // Ô Đực giữ cặp phối (2 con)
       ...cage,
       status: 'ghep_doi',
       statusLabel: 'Ghép đôi',
-      gender: 'doi',
+      gender: 'duc',
       ratCount: 2,
       matingDate: matingDate,
       partnerCageId: partner.id,
@@ -225,7 +300,29 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           id: `his-${Date.now()}-1`,
           timestamp: timestampStr,
           eventType: 'ghep_doi',
-          summary: `Bắt đầu ghép đôi với Ô ${partner.code} (Ngày ghép: ${formatDateVN(matingDate)}). Lịch tách ghép: +20 ngày.`,
+          summary: `Bắt đầu ghép đôi: Dúi Cái từ Ô ${partner.code} đã chuyển sang ghép chung tại Ô Đực này (Ngày ghép: ${formatDateVN(matingDate)}). Lịch tách ghép dự kiến: +20 ngày (${formatDateVN(addDays(matingDate, 20))}).`,
+          relatedCageCode: partner.code,
+          actor: 'Phan Dũng'
+        },
+        ...(cage.history || [])
+      ]
+    } : {
+      // Ô Cái: Dúi cái chuyển sang Ô Đực -> Về Trống do chuyển ghép (0 con)
+      ...cage,
+      status: 'trong',
+      statusLabel: 'Trống do chuyển ghép',
+      gender: 'cai',
+      ratCount: 0,
+      matingDate: matingDate,
+      partnerCageId: partner.id,
+      partnerCageCode: partner.code,
+      notes: `Dúi cái đã chuyển sang ghép đôi tại Ô Đực ${partner.code} từ ngày ${formatDateVN(matingDate)}. Lịch tách ghép: +20 ngày.`,
+      history: [
+        {
+          id: `his-${Date.now()}-1`,
+          timestamp: timestampStr,
+          eventType: 'ghep_doi',
+          summary: `Dúi cái đã chuyển sang ghép đôi tại Ô Đực ${partner.code} từ ngày ${formatDateVN(matingDate)}. Ô cái tạm thời để trống do chuyển ghép trong thời gian phối giống. Lịch tách ghép dự kiến: +20 ngày (${formatDateVN(addDays(matingDate, 20))}).`,
           relatedCageCode: partner.code,
           actor: 'Phan Dũng'
         },
@@ -233,13 +330,36 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
       ]
     };
 
-    // Ô đối tác (Ví dụ Ô Đực)
-    const updatedPartner: FarmCage = {
+    // Ô đối tác
+    const updatedPartner: FarmCage = currentIsMale ? {
+      // Ô Cái đối tác: Dúi cái đã chuyển sang Ô Đực -> Về Trống do chuyển ghép (0 con)
+      ...partner,
+      status: 'trong',
+      statusLabel: 'Trống do chuyển ghép',
+      gender: 'cai',
+      ratCount: 0,
+      matingDate: matingDate,
+      partnerCageId: cage.id,
+      partnerCageCode: cage.code,
+      notes: `Dúi cái đã chuyển sang ghép đôi tại Ô Đực ${cage.code} từ ngày ${formatDateVN(matingDate)}. Lịch tách ghép: +20 ngày.`,
+      history: [
+        {
+          id: `his-${Date.now()}-2`,
+          timestamp: timestampStr,
+          eventType: 'ghep_doi',
+          summary: `Dúi cái đã chuyển sang ghép đôi tại Ô Đực ${cage.code} từ ngày ${formatDateVN(matingDate)}. Ô cái tạm thời để trống do chuyển ghép trong thời gian phối giống. Lịch tách ghép dự kiến: +20 ngày (${formatDateVN(addDays(matingDate, 20))}).`,
+          relatedCageCode: cage.code,
+          actor: 'Phan Dũng'
+        },
+        ...(partner.history || [])
+      ]
+    } : {
+      // Ô Đực đối tác: Giữ cặp phối (2 con)
       ...partner,
       status: 'ghep_doi',
       statusLabel: 'Ghép đôi',
-      gender: 'doi',
-      ratCount: 0, // Đang mang sang chuồng cái
+      gender: 'duc',
+      ratCount: 2,
       matingDate: matingDate,
       partnerCageId: cage.id,
       partnerCageCode: cage.code,
@@ -248,7 +368,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           id: `his-${Date.now()}-2`,
           timestamp: timestampStr,
           eventType: 'ghep_doi',
-          summary: `Ghép đôi cùng Ô ${cage.code}. Lịch tách ghép: +20 ngày.`,
+          summary: `Bắt đầu ghép đôi: Dúi Cái từ Ô ${cage.code} đã chuyển sang ghép chung tại Ô Đực này (Ngày ghép: ${formatDateVN(matingDate)}). Lịch tách ghép dự kiến: +20 ngày (${formatDateVN(addDays(matingDate, 20))}).`,
           relatedCageCode: cage.code,
           actor: 'Phan Dũng'
         },
@@ -257,17 +377,18 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
     };
 
     onUpdateCage(updatedCurrent, updatedPartner);
-    showSuccess(`Đã bắt đầu ghép đôi giữa Ô ${cage.code} và Ô ${partner.code}`);
+    showSuccess(`Đã bắt đầu ghép đôi giữa Ô ${cage.code} và Ô ${partner.code}. Dúi cái chuyển sang Ô Đực (Ô Đực 2 con, Ô Cái về Trống)`);
   };
 
   // 4. NGHIỆP VỤ TÁCH GHÉP (Ô CÁI -> THEO DÕI 45-60 NGÀY; Ô ĐỰC -> CHỜ ĐÁNH GIÁ 10 NGÀY TỰ ĐỘNG SẴN SÀNG GHÉP)
   const handleSeparateMating = () => {
     const todayStr = separationDate || new Date().toISOString().split('T')[0];
     const timestampStr = `${todayStr} ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
-    const partner = allCages.find(c => c.id === cage.partnerCageId);
+    const partner = (cage.partnerCageId ? allCages.find(c => c.id === cage.partnerCageId) : null)
+      || allCages.find(c => c.code.trim().toUpperCase() === cage.partnerCageCode?.trim().toUpperCase());
 
     // Xác định ô nào là Cái, ô nào là Đực
-    const isCurrentFemale = cage.code.includes('SS') || cage.gender === 'cai' || cage.gender === 'doi';
+    const isCurrentFemale = isFemale(cage) || (!isMale(cage) && Boolean(partner && isMale(partner)));
 
     const updatedCurrent: FarmCage = isCurrentFemale ? {
       ...cage,
@@ -354,6 +475,37 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
 
     onUpdateCage(updatedCurrent, updatedPartner);
     showSuccess(`Đã ghi nhận tách ghép. Ô Cái theo dõi 45–60 ngày, Ô Đực dưỡng sức 10 ngày.`);
+  };
+
+  // 4B. GHI NHẬN TÁCH ĐỰC KHÔNG RÕ ĐỰC (CHO DÚI CÁI ĐÃ PHỐI THỰC TẾ NHƯNG KHÔNG RÕ ĐỐI TÁC ĐỰC)
+  const handleRecordSeparateUnknownMale = () => {
+    const todayStr = unknownSepDate || new Date().toISOString().split('T')[0];
+    const timestampStr = `${todayStr} ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
+    const updated: FarmCage = {
+      ...cage,
+      status: 'moi_tach_duc_khong_ro',
+      statusLabel: 'Tách đực (Không rõ đực) / Chờ kết quả',
+      gender: 'cai',
+      ratCount: 1,
+      matingSeparationDate: todayStr,
+      expectedEvaluationDate: addDays(todayStr, 60),
+      followupDurationDays: 60,
+      partnerCageCode: undefined,
+      partnerCageId: undefined,
+      history: [
+        {
+          id: `his-${Date.now()}-sep-unknown`,
+          timestamp: timestampStr,
+          eventType: 'cap_nhat_trang_thai',
+          summary: `Ghi nhận tách đực (không rõ đực phối) từ ngày ${formatDateVN(todayStr)}. Khởi tạo chu kỳ theo dõi thai 45-60 ngày (dự kiến ${formatDateVN(addDays(todayStr, 60))}).`,
+          actor: 'Phan Dũng'
+        },
+        ...(cage.history || [])
+      ]
+    };
+    onUpdateCage(updated);
+    showSuccess(`Đã ghi nhận tách đực (không rõ đực) cho Ô ${cage.code}`);
+    setShowUnknownSepForm(false);
   };
 
   // 5. XÁC NHẬN SINH CON (CHUYỂN SANG ĐANG NUOI CON)
@@ -757,14 +909,20 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
                 <h3 className="font-bold text-slate-900 text-sm">Hồ Sơ Ô Chuồng {cage.code}</h3>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                   cage.status === 'trong'
-                    ? 'bg-slate-200 text-slate-700'
+                    ? ((cage.partnerCageCode || cage.statusLabel?.includes('chuyển ghép'))
+                      ? 'bg-pink-100 text-pink-700 border border-pink-200'
+                      : 'bg-slate-200 text-slate-700')
                     : cage.status === 'dang_dieu_tri'
                     ? 'bg-rose-100 text-rose-800'
                     : cage.status === 'ghep_doi'
                     ? 'bg-purple-100 text-purple-800'
+                    : (cage.status === 'moi_tach_duc' || cage.status === 'moi_tach_duc_khong_ro')
+                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
                     : 'bg-emerald-100 text-emerald-800'
                 }`}>
-                  {cage.statusLabel}
+                  {cage.status === 'trong' && (cage.partnerCageCode || cage.statusLabel?.includes('chuyển ghép'))
+                    ? 'Trống do chuyển ghép'
+                    : cage.statusLabel}
                 </span>
               </div>
               <p className="text-xs text-slate-500 font-mono">
@@ -891,7 +1049,7 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
           {/* TAB 1: TỔNG QUAN Ô */}
           {activeTab === 'overview' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
                   <span className="text-[10px] text-slate-500 font-bold uppercase block">Số lượng</span>
                   <span className="text-lg font-black text-slate-900 font-mono">{cage.ratCount} cá thể</span>
@@ -909,17 +1067,85 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
                   </span>
                 </div>
                 <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Dòng giống</span>
+                  <span className="text-sm font-bold text-slate-800">
+                    {cage.species === 'ma_dao' ? 'Dúi Má Đào' : 'Dúi Mốc'}
+                  </span>
+                </div>
+                <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
                   <span className="text-[10px] text-slate-500 font-bold uppercase block">Trọng lượng</span>
                   <span className="text-lg font-black text-emerald-800 font-mono">{cage.currentWeightKg || '---'} kg</span>
                 </div>
               </div>
 
+              {/* THÔNG TIN GHÉP ĐÔI NỔI BẬT: Đang ghép vs ô nào, ngày nào, lịch tách ghép */}
+              {(cage.status === 'ghep_doi' || Boolean(cage.partnerCageCode)) && (
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-pink-50 via-rose-50 to-pink-100/70 border-2 border-pink-300 shadow-xs space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-pink-500 text-white flex items-center justify-center shadow-xs shrink-0">
+                        <Heart className="w-5 h-5 fill-white text-white" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-pink-700 block">
+                          {isFemale(cage) ? '♀ Ô CÁI ĐANG GHÉP ĐÔI' : (isMale(cage) ? '♂ Ô ĐỰC ĐANG GHÉP ĐÔI' : '⚤ CẶP GHÉP ĐÔI')}
+                        </span>
+                        <h4 className="text-sm font-black text-pink-950">
+                          {isFemale(cage)
+                            ? `Đang ghép cùng Ô Đực: ${cage.partnerCageCode || '---'}`
+                            : `Đang ghép cùng Ô Cái: ${cage.partnerCageCode || '---'}`}
+                        </h4>
+                      </div>
+                    </div>
+                    <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-pink-200 text-pink-900 border border-pink-300 shrink-0">
+                      Ghép đôi
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-pink-200/80 text-xs">
+                    <div className="flex items-center gap-2 text-slate-700">
+                      <Calendar className="w-4 h-4 text-pink-600 shrink-0" />
+                      <span>Ngày bắt đầu ghép: <strong className="text-pink-950 font-bold">{formatDateVN(cage.matingDate)}</strong></span>
+                    </div>
+                    {cage.matingDate && (
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <Clock className="w-4 h-4 text-pink-600 shrink-0" />
+                        <span>Lịch tách ghép (+20 ngày): <strong className="text-pink-950 font-bold">{formatDateVN(addDays(cage.matingDate, 20))}</strong></span>
+                      </div>
+                    )}
+                  </div>
+
+                  {(partnerCage || cage.partnerCageCode) && onSelectCage && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = partnerCage 
+                          || (allCages || []).find(c => c.code.trim().toUpperCase() === cage.partnerCageCode?.trim().toUpperCase() && (c.status === 'ghep_doi' || c.status !== 'trong'))
+                          || (allCages || []).find(c => c.code.trim().toUpperCase() === cage.partnerCageCode?.trim().toUpperCase());
+                        if (target) onSelectCage(target);
+                      }}
+                      className="w-full mt-1 py-2 px-3 rounded-xl bg-white hover:bg-pink-50 border border-pink-300 text-pink-800 font-bold text-xs flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5 text-pink-600" />
+                      <span>Chuyển sang xem hồ sơ Ô đối tác {partnerCage?.code || cage.partnerCageCode}</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Thông tin nghiệp vụ phụ thuộc trạng thái */}
               <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200 space-y-2">
                 <h4 className="font-bold text-emerald-900 flex items-center gap-1.5">
                   <Info className="w-4 h-4 text-emerald-700" />
-                  <span>Trạng thái kỹ thuật hiện tại: {cage.statusLabel}</span>
+                  <span>Trạng thái kỹ thuật hiện tại: {cage.status === 'trong' && (cage.partnerCageCode || cage.statusLabel?.includes('chuyển ghép')) ? 'Trống do chuyển ghép' : cage.statusLabel}</span>
                 </h4>
+
+                {cage.status === 'trong' && (cage.partnerCageCode || cage.statusLabel?.includes('chuyển ghép')) && (
+                  <p className="text-pink-900 bg-pink-50 p-2.5 rounded-lg border border-pink-200 text-xs leading-relaxed">
+                    Ô chuồng hiện <strong>Trống do chuyển ghép</strong>: Dúi cái đã được chuyển sang ghép đôi tại Ô Đực <strong>{cage.partnerCageCode || '---'}</strong> {cage.matingDate ? <>từ ngày <strong>{formatDateVN(cage.matingDate)}</strong></> : null}. 
+                    Lịch dự kiến tách ghép (+20 ngày): <strong>{cage.matingDate ? formatDateVN(addDays(cage.matingDate, 20)) : '+20 ngày'}</strong>.
+                  </p>
+                )}
 
                 {cage.status === 'ghep_doi' && (
                   <p className="text-slate-700">
@@ -932,7 +1158,14 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
 
                 {cage.status === 'moi_tach_duc' && (
                   <p className="text-slate-700">
-                    Đã tách đực ngày <strong>{formatDateVN(cage.matingSeparationDate)}</strong>. 
+                    Đã tách đực {cage.partnerCageCode ? <>cùng Ô <strong>{cage.partnerCageCode}</strong> </> : ''}ngày <strong>{formatDateVN(cage.matingSeparationDate)}</strong>. 
+                    Đang theo dõi kết quả thai trong 45–60 ngày (Dự kiến đánh giá: <strong>{formatDateVN(cage.expectedEvaluationDate)}</strong>).
+                  </p>
+                )}
+
+                {cage.status === 'moi_tach_duc_khong_ro' && (
+                  <p className="text-slate-700">
+                    Đã tách đực (không rõ đực phối) ngày <strong>{formatDateVN(cage.matingSeparationDate)}</strong>. 
                     Đang theo dõi kết quả thai trong 45–60 ngày (Dự kiến đánh giá: <strong>{formatDateVN(cage.expectedEvaluationDate)}</strong>).
                   </p>
                 )}
@@ -1015,12 +1248,24 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
                             required
                             className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white focus:border-emerald-600 focus:outline-hidden"
                           >
-                            <option value="">-- Chọn ô đối tác --</option>
-                            {availablePartners.map(p => (
-                              <option key={p.id} value={p.id}>
-                                Ô {p.code} ({p.gender === 'duc' ? 'Đực' : 'Cái'} • {p.currentWeightKg || 0}kg)
-                              </option>
-                            ))}
+                            <option value="">
+                              {isCurrentFemale 
+                                ? '-- Chọn ô đực sẵn sàng ghép trong khu --' 
+                                : (isCurrentMale ? '-- Chọn ô cái trống trong khu --' : '-- Chọn ô đối ứng trong khu --')}
+                            </option>
+                            {availablePartners.map(p => {
+                              const isTrong = p.status === 'trong';
+                              const tag = isCurrentFemale
+                                ? `♂ Đực • Sẵn sàng ghép${p.currentWeightKg ? ` • ${p.currentWeightKg}kg` : ''}`
+                                : isTrong
+                                ? '📦 Ô Cái trống'
+                                : `${isMale(p) ? '♂ Đực' : '♀ Cái'} • Sẵn sàng ghép${p.currentWeightKg ? ` • ${p.currentWeightKg}kg` : ''}`;
+                              return (
+                                <option key={p.id} value={p.id}>
+                                  Ô {p.code} [{tag}]
+                                </option>
+                              );
+                            })}
                           </select>
                         </div>
 
@@ -1043,6 +1288,55 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
                       >
                         Xác Nhận Ghép Đôi & Lên Lịch +20 Ngày
                       </button>
+
+                      {/* Lựa chọn phụ: Dúi cái thực tế đã tách đực nhưng không rõ đực phối */}
+                      {isCurrentFemale && (
+                        <div className="pt-2 border-t border-emerald-200">
+                          {!showUnknownSepForm ? (
+                            <button
+                              type="button"
+                              onClick={() => setShowUnknownSepForm(true)}
+                              className="text-xs text-amber-800 hover:text-amber-950 font-bold flex items-center gap-1.5 underline decoration-amber-400 cursor-pointer"
+                            >
+                              <span>⚡ Thực tế con cái này đã tách đực nhưng không rõ đực nào?</span>
+                            </button>
+                          ) : (
+                            <div className="p-3 rounded-xl bg-amber-100/70 border border-amber-300 space-y-2.5">
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-amber-950 text-xs flex items-center gap-1">
+                                  <Calendar className="w-3.5 h-3.5 text-amber-700" />
+                                  <span>Ghi nhận tách đực (không rõ đực phối)</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowUnknownSepForm(false)}
+                                  className="text-[11px] text-slate-500 hover:text-slate-800 cursor-pointer"
+                                >
+                                  Đóng
+                                </button>
+                              </div>
+                              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                                <div className="flex-1">
+                                  <label className="text-[10px] font-bold text-slate-700 block mb-0.5">Ngày tách đực:</label>
+                                  <input
+                                    type="date"
+                                    value={unknownSepDate}
+                                    onChange={e => setUnknownSepDate(e.target.value)}
+                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold"
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={handleRecordSeparateUnknownMale}
+                                  className="sm:self-end px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition-colors whitespace-nowrap cursor-pointer"
+                                >
+                                  Xác Nhận & Theo Dõi (+60 ngày)
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </form>
                   )}
 
@@ -1074,8 +1368,8 @@ export const FarmCageProfileModal: React.FC<FarmCageProfileModalProps> = ({
                     </div>
                   )}
 
-                  {/* Action C: Xác nhận Sinh con hoặc Không đậu thai nếu đang Mới tách đực */}
-                  {cage.status === 'moi_tach_duc' && (
+                  {/* Action C: Xác nhận Sinh con hoặc Không đậu thai nếu đang Mới tách đực (hoặc Tách đực không rõ đực) */}
+                  {(cage.status === 'moi_tach_duc' || cage.status === 'moi_tach_duc_khong_ro') && (
                     <form onSubmit={handleConfirmBirth} className="p-4 rounded-2xl border border-amber-200 bg-amber-50/40 space-y-3">
                       <h4 className="font-bold text-amber-900 flex items-center gap-1.5">
                         <span>🍼</span>

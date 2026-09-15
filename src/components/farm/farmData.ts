@@ -102,7 +102,7 @@ export const INITIAL_ROWS: FarmRow[] = [
   // 1. KHU SINH SẢN (Dãy Cái 1, Dãy Cái 2, Dãy Đực 1)
   { id: 'row-ss1-c1', areaId: 'area-ss1', code: 'DC1', name: 'Dãy Cái 1', kind: 'cai', genderBadge: '♀ Dãy Cái', tierCount: 2, cageCount: 5 },
   { id: 'row-ss1-c2', areaId: 'area-ss1', code: 'DC2', name: 'Dãy Cái 2', kind: 'cai', genderBadge: '♀ Dãy Cái', tierCount: 2, cageCount: 4 },
-  { id: 'row-ss1-d1', areaId: 'area-ss1', code: 'DD1', name: 'Dãy Đực 1', kind: 'duc', genderBadge: '♂ Dãy Đực', tierCount: 1, cageCount: 3 },
+  { id: 'row-ss1-d1', areaId: 'area-ss1', code: 'DĐ1', name: 'Dãy Đực 1', kind: 'duc', genderBadge: '♂ Dãy Đực', tierCount: 1, cageCount: 3 },
 
   // 2. KHU BABY (Dãy Baby 3–4 lạng, Dãy Baby 5–7 lạng, Dãy Baby 8 lạng–1,1 kg)
   { id: 'row-bb-1', areaId: 'area-bb', code: 'DB-3-4', name: 'Dãy Baby 3–4 lạng', kind: 'chung', genderBadge: 'Dãy 3–4 lạng', tierCount: 1, cageCount: 4 },
@@ -129,9 +129,9 @@ export function createStandardBreedingAreaStructure(
   areaName: string,
   description?: string
 ): { area: FarmArea; rows: FarmRow[]; cages: FarmCage[] } {
-  const rowC1Id = `row-${areaId}-c1`;
-  const rowC2Id = `row-${areaId}-c2`;
-  const rowD1Id = `row-${areaId}-d1`;
+  const rowC1Id = areaId === 'area-ss1' ? 'row-ss1-c1' : `row-${areaId}-c1`;
+  const rowC2Id = areaId === 'area-ss1' ? 'row-ss1-c2' : `row-${areaId}-c2`;
+  const rowD1Id = areaId === 'area-ss1' ? 'row-ss1-d1' : `row-${areaId}-d1`;
 
   const area: FarmArea = {
     id: areaId,
@@ -171,7 +171,7 @@ export function createStandardBreedingAreaStructure(
     {
       id: rowD1Id,
       areaId,
-      code: 'DD1',
+      code: 'DĐ1',
       name: 'Dãy Đực 1',
       kind: 'duc',
       genderBadge: '♂ Dãy Đực',
@@ -180,59 +180,63 @@ export function createStandardBreedingAreaStructure(
     }
   ];
 
-  const c1Prefix = 'C1';
-  const c2Prefix = 'C2';
-  const d1Prefix = 'D1';
-
   const cages: FarmCage[] = [
-    // Dãy Cái 1 (5 ô: C1-01 -> C1-05)
-    ...Array.from({ length: 5 }, (_, i) => ({
-      id: `cage-${areaId}-c1-${String(i + 1).padStart(2, '0')}`,
-      code: `${c1Prefix}-${String(i + 1).padStart(2, '0')}`,
-      areaId,
-      areaCode,
-      areaKind: 'sinh_san' as const,
-      rowId: rowC1Id,
-      rowCode: 'Dãy Cái 1',
-      tier: i < 3 ? 1 : 2,
-      slotNumber: `V${i + 1}`,
-      status: 'trong' as const,
-      statusLabel: 'Trống',
-      gender: 'cai' as const,
-      species: 'moc_dai' as const,
-      ratCount: 0,
-      weightHistory: [],
-      healthHistory: [],
-      history: [],
-      notes: ''
-    })),
+    // Dãy Cái 1 (5 ô: DC1-H1-001 -> 003, DC1-H2-001 -> 002)
+    ...Array.from({ length: 5 }, (_, i) => {
+      const tier = i < 3 ? 1 : 2;
+      const tierIndex = i < 3 ? (i + 1) : (i - 2);
+      return {
+        id: `cage-${areaId}-dc1-${tier}-${String(tierIndex).padStart(3, '0')}`,
+        code: `DC1-H${tier}-${String(tierIndex).padStart(3, '0')}`,
+        areaId,
+        areaCode,
+        areaKind: 'sinh_san' as const,
+        rowId: rowC1Id,
+        rowCode: 'Dãy Cái 1',
+        tier,
+        slotNumber: `V${i + 1}`,
+        status: 'trong' as const,
+        statusLabel: 'Trống',
+        gender: 'cai' as const,
+        species: 'moc_dai' as const,
+        ratCount: 0,
+        weightHistory: [],
+        healthHistory: [],
+        history: [],
+        notes: ''
+      };
+    }),
 
-    // Dãy Cái 2 (4 ô: C2-01 -> C2-04)
-    ...Array.from({ length: 4 }, (_, i) => ({
-      id: `cage-${areaId}-c2-${String(i + 1).padStart(2, '0')}`,
-      code: `${c2Prefix}-${String(i + 1).padStart(2, '0')}`,
-      areaId,
-      areaCode,
-      areaKind: 'sinh_san' as const,
-      rowId: rowC2Id,
-      rowCode: 'Dãy Cái 2',
-      tier: i < 2 ? 1 : 2,
-      slotNumber: `V${i + 1}`,
-      status: 'trong' as const,
-      statusLabel: 'Trống',
-      gender: 'cai' as const,
-      species: 'moc_dai' as const,
-      ratCount: 0,
-      weightHistory: [],
-      healthHistory: [],
-      history: [],
-      notes: ''
-    })),
+    // Dãy Cái 2 (4 ô: DC2-H1-001 -> 002, DC2-H2-001 -> 002)
+    ...Array.from({ length: 4 }, (_, i) => {
+      const tier = i < 2 ? 1 : 2;
+      const tierIndex = i < 2 ? (i + 1) : (i - 1);
+      return {
+        id: `cage-${areaId}-dc2-${tier}-${String(tierIndex).padStart(3, '0')}`,
+        code: `DC2-H${tier}-${String(tierIndex).padStart(3, '0')}`,
+        areaId,
+        areaCode,
+        areaKind: 'sinh_san' as const,
+        rowId: rowC2Id,
+        rowCode: 'Dãy Cái 2',
+        tier,
+        slotNumber: `V${i + 1}`,
+        status: 'trong' as const,
+        statusLabel: 'Trống',
+        gender: 'cai' as const,
+        species: 'moc_dai' as const,
+        ratCount: 0,
+        weightHistory: [],
+        healthHistory: [],
+        history: [],
+        notes: ''
+      };
+    }),
 
-    // Dãy Đực 1 (3 ô: D1-01 -> D1-03)
+    // Dãy Đực 1 (3 ô: DĐ1-H1-001 -> DĐ1-H1-003)
     ...Array.from({ length: 3 }, (_, i) => ({
-      id: `cage-${areaId}-d1-${String(i + 1).padStart(2, '0')}`,
-      code: `${d1Prefix}-${String(i + 1).padStart(2, '0')}`,
+      id: `cage-${areaId}-dd1-1-${String(i + 1).padStart(3, '0')}`,
+      code: `DĐ1-H1-${String(i + 1).padStart(3, '0')}`,
       areaId,
       areaCode,
       areaKind: 'sinh_san' as const,
@@ -1569,7 +1573,7 @@ export function generateAutoTasks(
     }
 
     // 4. Mới tách đực / Chờ kết quả mang thai (Theo dõi 45-60 ngày)
-    if (cage.status === 'moi_tach_duc') {
+    if (cage.status === 'moi_tach_duc' || cage.status === 'moi_tach_duc_khong_ro') {
       const dueDate = cage.expectedEvaluationDate || (cage.matingSeparationDate ? addDays(cage.matingSeparationDate, 35) : (cage.matingDate ? addDays(cage.matingDate, 50) : null));
       if (dueDate) {
         const diff = daysBetween(dueDate, todayStr);
@@ -1973,6 +1977,157 @@ export const VETERINARY_PROTOCOLS: VeterinaryProtocolItem[] = [
 // CƠ CHẾ BỘ LỌC MÃ Ô KHUYẾT & SẮP XẾP TỰ NHIÊN
 // ==========================================
 
+/**
+ * Trích xuất chỉ số thứ tự của Dãy (1, 2, 3...) từ mã hoặc tên dãy.
+ */
+export function extractRowNumber(rowCode: string = '', rowName: string = ''): number {
+  const codeMatch = rowCode.match(/\d+/);
+  if (codeMatch) return parseInt(codeMatch[0], 10);
+  const nameMatch = rowName.match(/\d+/);
+  if (nameMatch) return parseInt(nameMatch[0], 10);
+  return 1;
+}
+
+/**
+ * Tự động tạo gợi ý tên và mã cho Dãy mới theo phân loại (Đực, Cái, Chung).
+ * Tự đồng bộ số thứ tự tiếp theo:
+ * - Dãy Đực: Dãy Đực 1 (DĐ1), Dãy Đực 2 (DĐ2), Dãy Đực 3 (DĐ3)...
+ * - Dãy Cái: Dãy Cái 1 (DC1), Dãy Cái 2 (DC2), Dãy Cái 3 (DC3)...
+ * - Chung / Khác: Dãy 1 (D1), Dãy 2 (D2)...
+ */
+export function computeNextRowSuggestion(
+  existingRowsInArea: FarmRow[] = [],
+  kind: 'cai' | 'duc' | 'chung' = 'cai'
+): { name: string; code: string; tierCount: number } {
+  if (kind === 'duc') {
+    const ducRows = existingRowsInArea.filter(r => 
+      r.kind === 'duc' || 
+      r.code.toUpperCase().includes('DĐ') || 
+      r.code.toUpperCase().includes('DD') || 
+      r.name.toLowerCase().includes('đực')
+    );
+    let maxIdx = 0;
+    ducRows.forEach(r => {
+      const idx = extractRowNumber(r.code, r.name);
+      if (idx > maxIdx) maxIdx = idx;
+    });
+    const nextIdx = maxIdx + 1;
+    return {
+      name: `Dãy Đực ${nextIdx}`,
+      code: `DĐ${nextIdx}`,
+      tierCount: 1
+    };
+  }
+
+  if (kind === 'cai') {
+    const caiRows = existingRowsInArea.filter(r => 
+      r.kind === 'cai' || 
+      r.code.toUpperCase().includes('DC') || 
+      r.name.toLowerCase().includes('cái')
+    );
+    let maxIdx = 0;
+    caiRows.forEach(r => {
+      const idx = extractRowNumber(r.code, r.name);
+      if (idx > maxIdx) maxIdx = idx;
+    });
+    const nextIdx = maxIdx + 1;
+    return {
+      name: `Dãy Cái ${nextIdx}`,
+      code: `DC${nextIdx}`,
+      tierCount: 2
+    };
+  }
+
+  // Chung / Khác
+  const chungRows = existingRowsInArea.filter(r => 
+    r.kind === 'chung' || 
+    (!r.kind && !r.name.toLowerCase().includes('cái') && !r.name.toLowerCase().includes('đực'))
+  );
+  let maxIdx = 0;
+  chungRows.forEach(r => {
+    const idx = extractRowNumber(r.code, r.name);
+    if (idx > maxIdx) maxIdx = idx;
+  });
+  const nextIdx = maxIdx + 1;
+  return {
+    name: `Dãy ${nextIdx}`,
+    code: `D${nextIdx}`,
+    tierCount: 1
+  };
+}
+
+/**
+ * Sinh tiền tố chuẩn cho Mã Ô Chuồng theo Dãy, Tầng (Hàng) và Phân khu.
+ * - Dãy Đực 1, Hàng 1 -> "DĐ1-H1-"
+ * - Dãy Đực 2, Hàng 1 -> "DĐ2-H1-"
+ * - Dãy Cái 1, Hàng 1 -> "DC1-H1-"
+ * - Dãy Cái 1, Hàng 2 -> "DC1-H2-"
+ * - Dãy Cái 2, Hàng 1 -> "DC2-H1-"
+ */
+export function computeCageCodePrefix(
+  row?: FarmRow,
+  tier: number = 1,
+  area?: FarmArea
+): string {
+  const safeTier = tier || 1;
+  
+  if (row) {
+    const isDuc = row.kind === 'duc' || 
+      row.code.toUpperCase().includes('DĐ') || 
+      row.code.toUpperCase().includes('DD') || 
+      row.name.toLowerCase().includes('đực');
+
+    if (isDuc) {
+      const rowNum = extractRowNumber(row.code, row.name);
+      return `DĐ${rowNum}-H${safeTier}-`;
+    }
+
+    const isCai = row.kind === 'cai' || 
+      row.code.toUpperCase().includes('DC') || 
+      row.name.toLowerCase().includes('cái');
+
+    if (isCai) {
+      const rowNum = extractRowNumber(row.code, row.name);
+      return `DC${rowNum}-H${safeTier}-`;
+    }
+
+    // Nếu là baby
+    if (area?.kind === 'baby' || row.areaId === 'area-bb' || row.code.startsWith('DB-') || row.code.startsWith('BB')) {
+      const rowNum = extractRowNumber(row.code, row.name);
+      return `BB${rowNum}-H${safeTier}-`;
+    }
+
+    // Nếu là hậu bị
+    if (area?.kind === 'hau_bi' || row.code.startsWith('HB')) {
+      const rowNum = extractRowNumber(row.code, row.name);
+      return `HB${rowNum}-H${safeTier}-`;
+    }
+
+    // Nếu là thương phẩm
+    if (area?.kind === 'thuong_pham' || row.code.startsWith('TP')) {
+      const rowNum = extractRowNumber(row.code, row.name);
+      return `TP${rowNum}-H${safeTier}-`;
+    }
+
+    // Nếu là điều trị
+    if (area?.kind === 'dieu_tri' || row.code.startsWith('DT')) {
+      const rowNum = extractRowNumber(row.code, row.name);
+      return `DT${rowNum}-H${safeTier}-`;
+    }
+
+    // Mặc định dùng mã row sạch
+    const cleanRowCode = row.code.replace(/[^a-zA-Z0-9Đđ]/g, '') || 'D1';
+    return `${cleanRowCode}-H${safeTier}-`;
+  }
+
+  // Nếu chưa có row nhưng biết phân khu
+  if (area?.kind === 'sinh_san') {
+    return `DC1-H${safeTier}-`;
+  }
+
+  return `O-H${safeTier}-`;
+}
+
 export function extractCagePrefixAndNumber(code: string): { prefix: string; num: number; numDigits: number } {
   const match = code.match(/^(.*?)(\d+)$/);
   if (match) {
@@ -2006,54 +2161,77 @@ export function sortCagesNaturally(cages: FarmCage[]): FarmCage[] {
 
 export function findGapAndNextCageCodes(
   existingCagesInRow: FarmCage[] = [],
-  defaultPrefix: string = 'C1-',
-  suggestCount: number = 3
+  defaultPrefix: string = 'DC1-H1-',
+  suggestCount: number = 3,
+  allExistingCagesInArea: FarmCage[] = []
 ): { gapCodes: string[]; nextCodes: string[] } {
-  if (!existingCagesInRow || existingCagesInRow.length === 0) {
-    return {
-      gapCodes: [],
-      nextCodes: [`${defaultPrefix}01`, `${defaultPrefix}02`, `${defaultPrefix}03`]
-    };
-  }
+  const padLength = (defaultPrefix.includes('-H') || defaultPrefix.startsWith('DĐ') || defaultPrefix.startsWith('DC')) ? 3 : 2;
+
+  // Thu thập toàn bộ mã ô đã tồn tại trong Khu vực hoặc trong Dãy để tuyệt đối không gợi ý mã trùng
+  const usedCodesSet = new Set<string>();
+  existingCagesInRow.forEach(c => {
+    if (c?.code) usedCodesSet.add(c.code.trim().toUpperCase());
+  });
+  allExistingCagesInArea.forEach(c => {
+    if (c?.code) usedCodesSet.add(c.code.trim().toUpperCase());
+  });
 
   const numList: { prefix: string; num: number; numDigits: number }[] = [];
-  existingCagesInRow.forEach(c => {
+  const relevantCages = existingCagesInRow.length > 0 
+    ? existingCagesInRow 
+    : allExistingCagesInArea.filter(c => c.code?.toUpperCase().startsWith(defaultPrefix.toUpperCase()));
+
+  relevantCages.forEach(c => {
     const parsed = extractCagePrefixAndNumber(c.code);
     numList.push(parsed);
   });
 
   const matchingItems = numList.filter(item => item.prefix.toUpperCase() === defaultPrefix.toUpperCase());
-  const dominantPrefix = matchingItems.length > 0 ? matchingItems[0].prefix : (numList[0]?.prefix || defaultPrefix);
-  const digits = (matchingItems.length > 0 ? matchingItems[0].numDigits : numList[0]?.numDigits) || 2;
+  const dominantPrefix = matchingItems.length > 0 ? matchingItems[0].prefix : defaultPrefix;
+  const digits = Math.max(
+    padLength,
+    matchingItems.length > 0 ? matchingItems[0].numDigits : (numList[0]?.numDigits || padLength)
+  );
 
-  const numbers = (matchingItems.length > 0 ? matchingItems : numList)
+  const numbers = matchingItems
     .filter(item => item.num > 0)
     .map(item => item.num)
     .sort((a, b) => a - b);
 
+  const gapCodes: string[] = [];
+  const nextCodes: string[] = [];
+
   if (numbers.length === 0) {
-    return {
-      gapCodes: [],
-      nextCodes: [`${dominantPrefix}01`, `${dominantPrefix}02`, `${dominantPrefix}03`]
-    };
+    let candidate = 1;
+    while (nextCodes.length < suggestCount && candidate < 1000) {
+      const formatted = `${dominantPrefix}${String(candidate).padStart(digits, '0')}`;
+      if (!usedCodesSet.has(formatted.toUpperCase())) {
+        nextCodes.push(formatted);
+      }
+      candidate++;
+    }
+    return { gapCodes, nextCodes };
   }
 
   const maxNum = numbers[numbers.length - 1];
   const numSet = new Set(numbers);
-  const gapCodes: string[] = [];
 
   for (let i = 1; i < maxNum; i++) {
     if (!numSet.has(i)) {
       const formatted = `${dominantPrefix}${String(i).padStart(digits, '0')}`;
-      gapCodes.push(formatted);
+      if (!usedCodesSet.has(formatted.toUpperCase())) {
+        gapCodes.push(formatted);
+      }
     }
   }
 
-  const nextCodes: string[] = [];
-  for (let i = 1; i <= suggestCount; i++) {
-    const nextNum = maxNum + i;
-    const formatted = `${dominantPrefix}${String(nextNum).padStart(digits, '0')}`;
-    nextCodes.push(formatted);
+  let candidateNum = maxNum + 1;
+  while (nextCodes.length < suggestCount && candidateNum < maxNum + 1000) {
+    const formatted = `${dominantPrefix}${String(candidateNum).padStart(digits, '0')}`;
+    if (!usedCodesSet.has(formatted.toUpperCase())) {
+      nextCodes.push(formatted);
+    }
+    candidateNum++;
   }
 
   return { gapCodes, nextCodes };
@@ -2081,19 +2259,211 @@ export function normalizeFarmCage(c: any): FarmCage {
     return [];
   };
 
+  let rowId = c.rowId;
+  let rowCode = c.rowCode;
+  const code = (c.code || '').trim().toUpperCase();
+
+  let areaId = c.areaId;
+  let areaCode = c.areaCode;
+  if (!areaId || areaId === 'KHU-SS1' || areaId === 'default') {
+    if (code.startsWith('DC') || code.startsWith('DĐ') || code.startsWith('DD') || c.areaCode === 'KHU-SS1') {
+      areaId = 'area-ss1';
+      areaCode = 'KHU-SS1';
+    } else if (code.startsWith('BB')) {
+      areaId = 'area-bb';
+      areaCode = 'KHU-BB';
+    } else if (code.startsWith('HB')) {
+      areaId = 'area-hb';
+      areaCode = 'KHU-HB';
+    } else if (code.startsWith('TP')) {
+      areaId = 'area-tp';
+      areaCode = 'KHU-TP';
+    } else if (code.startsWith('CL') || code.startsWith('DT')) {
+      areaId = 'area-cl';
+      areaCode = 'KHU-CL';
+    }
+  }
+
+  if (rowId === 'row-area-ss1-c1' || (areaId === 'area-ss1' && code.startsWith('DC1'))) {
+    rowId = 'row-ss1-c1';
+    rowCode = rowCode || 'Dãy Cái 1';
+  } else if (rowId === 'row-area-ss1-c2' || (areaId === 'area-ss1' && code.startsWith('DC2'))) {
+    rowId = 'row-ss1-c2';
+    rowCode = rowCode || 'Dãy Cái 2';
+  } else if (rowId === 'row-area-ss1-d1' || (areaId === 'area-ss1' && (code.startsWith('DĐ1') || code.startsWith('DD1')))) {
+    rowId = 'row-ss1-d1';
+    rowCode = rowCode || 'Dãy Đực 1';
+  }
+
+  // Xác định xem có phải thuộc Khu Sinh Sản không (mỗi ô nuôi 1 con, khi ghép đôi lên 2, ô cái về trống)
+  const isBreedingArea = (c.areaKind === 'sinh_san') || 
+    (areaId === 'area-ss1') || 
+    (c.areaCode === 'KHU-SS1') || 
+    code.startsWith('DC') || 
+    code.startsWith('DĐ') || 
+    code.startsWith('DD') ||
+    (c.rowCode && (c.rowCode.includes('Dãy Cái') || c.rowCode.includes('Dãy Đực')));
+
+  let normalizedRatCount: number;
+  if (isTrong) {
+    normalizedRatCount = 0;
+  } else if (isBreedingArea) {
+    if (c.status === 'ghep_doi') {
+      normalizedRatCount = 2; // Cặp ghép đôi
+    } else if (c.status === 'dang_nuoi_con') {
+      normalizedRatCount = 1 + (typeof c.livingBabyCount === 'number' ? c.livingBabyCount : (typeof c.totalBornCount === 'number' ? c.totalBornCount : 4));
+    } else {
+      // Mỗi ô sinh sản nuôi 1 con (sẵn sàng ghép, đực giống, mới tách đực, mới tách đực không rõ, mới tách cái, mới tách con...)
+      normalizedRatCount = 1;
+    }
+  } else {
+    normalizedRatCount = typeof c.ratCount === 'number' ? c.ratCount : (isTrong ? 0 : 1);
+  }
+
   return {
     ...c,
     id: c.id || `cage-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     code: c.code || 'CH-00',
+    areaId: areaId || c.areaId,
+    areaCode: areaCode || c.areaCode,
+    rowId,
+    rowCode,
     status: c.status || 'trong',
-    statusLabel: c.statusLabel || (isTrong ? 'Trống' : 'Không xác định'),
+    statusLabel: isTrong 
+      ? (c.partnerCageCode || (c.notes && c.notes.includes('ghép đôi')) || (c.statusLabel && c.statusLabel.includes('chuyển ghép')) ? 'Trống do chuyển ghép' : (c.statusLabel || 'Trống'))
+      : (c.statusLabel || 'Không xác định'),
     species: c.species || 'moc_dai',
     gender: isTrong ? (c.gender || undefined) : (c.gender || 'dan'),
-    ratCount: typeof c.ratCount === 'number' ? c.ratCount : (isTrong ? 0 : 1),
+    ratCount: normalizedRatCount,
     weightHistory: toCleanArray(c.weightHistory),
     healthHistory: toCleanArray(c.healthHistory),
     treatmentFollowups: toCleanArray(c.treatmentFollowups),
     history: toCleanArray(c.history),
     notes: c.notes || ''
   };
+}
+
+/**
+ * Điều hòa nghiệp vụ Khu Sinh Sản:
+ * - Mỗi ô sinh sản nuôi 1 con (nếu đang ở trạng thái nuôi đơn).
+ * - Khi ghép đôi: Cặp ghép ở tại Ô Đực (ratCount = 2), Ô Cái về Trống (ratCount = 0 do chuyển ghép đôi).
+ */
+export function reconcileBreedingPairCages(cages: FarmCage[]): FarmCage[] {
+  if (!Array.isArray(cages)) return [];
+
+  const isFemaleCage = (c: FarmCage): boolean => {
+    if (c.gender === 'cai') return true;
+    const code = (c.code || '').toUpperCase();
+    const row = (c.rowCode || '').toUpperCase();
+    return code.startsWith('DC') || row.startsWith('DC') || row.includes('CÁI') || code.includes('CAI');
+  };
+
+  const isMaleCage = (c: FarmCage): boolean => {
+    if (c.gender === 'duc') return true;
+    const code = (c.code || '').toUpperCase();
+    const row = (c.rowCode || '').toUpperCase();
+    return code.startsWith('DĐ') || code.startsWith('DD') || row.startsWith('DĐ') || row.startsWith('DD') || row.includes('ĐỰC') || code.includes('DUC');
+  };
+
+  return cages.map(c => {
+    const isBreeding = c.areaKind === 'sinh_san' || c.areaId === 'area-ss1' || c.areaCode === 'KHU-SS1' ||
+      c.code.startsWith('DC') || c.code.startsWith('DĐ') || c.code.startsWith('DD');
+
+    if (!isBreeding) return c;
+
+    // Nếu ô cái có trạng thái ghép đôi thì chuyển về Trống do chuyển ghép (0 con) vì dúi cái đã chuyển sang ô đực
+    if (c.status === 'ghep_doi' && isFemaleCage(c) && !isMaleCage(c)) {
+      return {
+        ...c,
+        status: 'trong',
+        statusLabel: 'Trống do chuyển ghép',
+        gender: 'cai',
+        ratCount: 0,
+        notes: c.notes || (c.partnerCageCode ? `Dúi cái chuyển sang ghép đôi tại Ô Đực ${c.partnerCageCode}. Ô tạm thời để trống do chuyển ghép.` : 'Dúi cái đã chuyển sang ô đực ghép đôi.')
+      };
+    }
+
+    // Nếu ô cái đang ở trạng thái Trống nhưng có liên kết ghép đôi
+    if (c.status === 'trong' && (c.partnerCageCode || (c.notes && c.notes.includes('chuyển sang ghép')))) {
+      return {
+        ...c,
+        status: 'trong',
+        statusLabel: 'Trống do chuyển ghép',
+        gender: c.gender || 'cai',
+        ratCount: 0
+      };
+    }
+
+    // Nếu là ô đực đang ghép đôi
+    if (c.status === 'ghep_doi') {
+      return {
+        ...c,
+        ratCount: 2,
+        gender: c.gender || 'duc'
+      };
+    }
+
+    // Ô trống
+    if (c.status === 'trong') {
+      return {
+        ...c,
+        ratCount: 0
+      };
+    }
+
+    // Đang nuôi con: mẹ + đàn con
+    if (c.status === 'dang_nuoi_con') {
+      return {
+        ...c,
+        ratCount: 1 + (c.livingBabyCount || c.totalBornCount || 4)
+      };
+    }
+
+    // Mọi trạng thái nuôi đơn còn lại của Khu Sinh Sản: quy chuẩn đúng 1 con
+    return {
+      ...c,
+      ratCount: 1
+    };
+  });
+}
+
+/**
+ * Khử trùng lặp ô chuồng theo Mã ô (Code)
+ * Ưu tiên tuyệt đối ô có dữ liệu ghép đôi, lịch sử, cân nặng, hoặc đang nuôi thay vì ô trống
+ */
+export function deduplicateCagesByCode(cages: FarmCage[]): FarmCage[] {
+  if (!Array.isArray(cages)) return [];
+  const map = new Map<string, FarmCage>();
+  
+  const calcScore = (item: FarmCage): number => {
+    let score = 0;
+    if (item.status !== 'trong') score += 20;
+    if (item.status === 'ghep_doi') score += 30;
+    if (item.partnerCageCode) score += 25;
+    if (item.partnerCageId) score += 10;
+    if (item.matingDate) score += 15;
+    score += (item.ratCount || 0) * 3;
+    score += (item.history?.length || 0) * 2;
+    score += (item.weightHistory?.length || 0) * 2;
+    score += (item.healthHistory?.length || 0) * 2;
+    if (item.notes && item.notes.trim().length > 0) score += 5;
+    return score;
+  };
+
+  for (const raw of cages) {
+    if (!raw || !raw.code) continue;
+    const c = normalizeFarmCage(raw);
+    const codeKey = c.code.trim().toUpperCase();
+    const existing = map.get(codeKey);
+    if (!existing) {
+      map.set(codeKey, c);
+    } else {
+      const existingScore = calcScore(existing);
+      const newScore = calcScore(c);
+      if (newScore > existingScore) {
+        map.set(codeKey, c);
+      }
+    }
+  }
+  return Array.from(map.values());
 }

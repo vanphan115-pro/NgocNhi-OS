@@ -8,7 +8,7 @@ export const SYSTEM_INFO = {
   establishedYear: '2020',
   phoneHotline: '0967823801',
   phoneTech: '0969310601',
-  description: 'Hệ thống dịch vụ thống nhất kết hợp ẩm thực đặc sản cao cấp (Quán Ăn Ngọc Nhi) và tổ chức sự kiện tiệc cưới sang trọng trọn gói với trung tâm điều hành hiện đại.',
+  description: 'Hệ thống dịch vụ thống nhất kết hợp ẩm thực đặc sản cao cấp (Quán Ăn Ngọc Nhi), tổ chức sự kiện tiệc cưới sang trọng trọn gói và Trang trại dúi hiện đại.',
 };
 
 export const MANAGERS: { dungKaka: ManagerProfile & { avatar: string }; ngocNhi: ManagerProfile & { avatar: string } } = {

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { 
   AreaKind, 
   CageStatus, 
@@ -35,6 +35,7 @@ export function getStatusOptionsByAreaKind(areaKind: AreaKind): StatusOption[] {
         { value: 'san_sang_ghep', label: 'Sẵn sàng ghép' },
         { value: 'ghep_doi', label: 'Ghép đôi' },
         { value: 'moi_tach_duc', label: 'Mới tách đực / Chờ kết quả' },
+        { value: 'moi_tach_duc_khong_ro', label: 'Tách đực (Không rõ đực) / Chờ kết quả' },
         { value: 'moi_tach_cai', label: 'Mới tách cái / Chờ đánh giá' },
         { value: 'moi_tach_con', label: 'Mới tách con / Đang dưỡng' },
         { value: 'dang_nuoi_con', label: 'Đang nuôi con' },
@@ -92,6 +93,8 @@ export function getCageStatusLabel(status: CageStatus): string {
       return 'Ghép đôi';
     case 'moi_tach_duc':
       return 'Mới tách đực / Chờ kết quả';
+    case 'moi_tach_duc_khong_ro':
+      return 'Tách đực (Không rõ đực) / Chờ kết quả';
     case 'moi_tach_cai':
       return 'Mới tách cái / Chờ đánh giá';
     case 'moi_tach_con':
@@ -219,6 +222,28 @@ interface FarmStatusBusinessFormProps {
   onChange: (updates: Partial<BusinessFormData>) => void;
   existingCages?: FarmCage[];
   allAreas?: FarmArea[];
+  currentCageId?: string;
+  currentAreaId?: string;
+  currentCageCode?: string;
+  currentCageGender?: 'duc' | 'cai' | 'doi' | 'dan';
+}
+
+// Helper kiểm tra ô cái (chuồng cái)
+export function isFemaleCageCheck(c: { code?: string; gender?: string; rowCode?: string }): boolean {
+  if (c.gender === 'cai') return true;
+  const code = (c.code || '').toUpperCase();
+  const row = (c.rowCode || '').toUpperCase();
+  if (code.startsWith('DC') || code.startsWith('C') || row.startsWith('DC') || row.startsWith('C') || code.includes('CAI')) return true;
+  return false;
+}
+
+// Helper kiểm tra ô đực (chuồng đực)
+export function isMaleCageCheck(c: { code?: string; gender?: string; rowCode?: string }): boolean {
+  if (c.gender === 'duc') return true;
+  const code = (c.code || '').toUpperCase();
+  const row = (c.rowCode || '').toUpperCase();
+  if (code.startsWith('DĐ') || code.startsWith('DD') || (code.startsWith('D') && !code.startsWith('DC')) || row.startsWith('DĐ') || row.startsWith('DD') || (row.startsWith('D') && !row.startsWith('DC')) || code.includes('DUC')) return true;
+  return false;
 }
 
 export const FarmStatusBusinessForm: React.FC<FarmStatusBusinessFormProps> = ({
@@ -226,6 +251,11 @@ export const FarmStatusBusinessForm: React.FC<FarmStatusBusinessFormProps> = ({
   data,
   onChange,
   existingCages = [],
+  allAreas = [],
+  currentCageId,
+  currentAreaId,
+  currentCageCode,
+  currentCageGender,
 }) => {
   const isTrống = data.status === 'trong';
   const isDead = data.status === 'chet';
@@ -241,9 +271,158 @@ export const FarmStatusBusinessForm: React.FC<FarmStatusBusinessFormProps> = ({
     );
   }
 
-  // Lọc danh sách ô đực / cái / baby để gợi ý chọn ô đối ứng
-  const maleCages = existingCages.filter(c => c.gender === 'duc' || c.code.startsWith('D'));
-  const femaleCages = existingCages.filter(c => c.gender === 'cai' || c.code.startsWith('C'));
+  // Xác định khu vực hiện tại
+  const currentArea = allAreas.find(a => a.id === currentAreaId) || 
+                      allAreas.find(a => a.kind === areaKind);
+  const currentAreaName = currentArea ? currentArea.name : 'Khu hiện tại';
+
+  // Kiểm tra ô hiện tại là Ô Cái hay Ô Đực
+  const isCurrentFemale = useMemo(() => {
+    if (currentCageGender === 'cai') return true;
+    if (currentCageGender === 'duc') return false;
+    if (data.gender === 'cai') return true;
+    if (data.gender === 'duc') return false;
+    if (currentCageCode && isFemaleCageCheck({ code: currentCageCode })) return true;
+    if (currentCageCode && isMaleCageCheck({ code: currentCageCode })) return false;
+    if (currentCageId) {
+      const current = existingCages.find(c => c.id === currentCageId);
+      if (current) return isFemaleCageCheck(current);
+    }
+    return false;
+  }, [currentCageGender, data.gender, currentCageCode, currentCageId, existingCages]);
+
+  const isCurrentMale = useMemo(() => {
+    if (currentCageGender === 'duc') return true;
+    if (currentCageGender === 'cai') return false;
+    if (data.gender === 'duc') return true;
+    if (data.gender === 'cai') return false;
+    if (currentCageCode && isMaleCageCheck({ code: currentCageCode })) return true;
+    if (currentCageCode && isFemaleCageCheck({ code: currentCageCode })) return false;
+    if (currentCageId) {
+      const current = existingCages.find(c => c.id === currentCageId);
+      if (current) return isMaleCageCheck(current);
+    }
+    return !isCurrentFemale;
+  }, [currentCageGender, data.gender, currentCageCode, currentCageId, existingCages, isCurrentFemale]);
+
+  // Lọc danh sách ô thuộc đúng khu này ("Khu nào thì chỉ hiện ô của khu đấy")
+  const areaCages = useMemo(() => {
+    if (currentAreaId) {
+      return existingCages.filter(c => c.areaId === currentAreaId);
+    }
+    // Fallback nếu không có currentAreaId: lọc theo areaKind
+    return existingCages.filter(c => c.areaKind === areaKind);
+  }, [existingCages, currentAreaId, areaKind]);
+
+  // Lọc danh sách ứng viên đối ứng cho ghép đôi theo đúng quy tắc người dùng yêu cầu:
+  // - Khi thêm/sửa thông tin Ô Cái: CHỈ CẦN HIỆN Ô ĐỰC SẴN SÀNG GHÉP (TUYỆT ĐỐI KHÔNG HIỆN Ô TRỐNG)
+  // - Khi thêm/sửa thông tin Ô Đực: CHỈ CẦN HIỆN Ô CÁI TRỐNG
+  const partnerCandidates = useMemo(() => {
+    const candidateMap = new Map<string, FarmCage>();
+
+    areaCages.forEach(c => {
+      // 1. Không cho phép tự chọn chính ô này
+      if (currentCageId && c.id === currentCageId) return;
+      if (currentCageCode && c.code.toUpperCase() === currentCageCode.toUpperCase()) return;
+
+      const codeKey = c.code.trim().toUpperCase();
+      const isSelectedPartner = Boolean(
+        data.partnerCageCode && codeKey === data.partnerCageCode.trim().toUpperCase()
+      );
+
+      // 2. Quy tắc cốt lõi khi thao tác tại Ô Cái:
+      if (isCurrentFemale) {
+        // Thao tác tại ô Cái -> CHỈ ĐƯỢC PHÉP CHỌN Ô ĐỰC SẴN SÀNG GHÉP (hoặc ô đực đã ghép trước đó nếu đang sửa)
+        // TUYỆT ĐỐI BỎ QUA Ô TRỐNG!
+        if (!isMaleCageCheck(c)) return;
+
+        if (isSelectedPartner) {
+          if (c.status === 'san_sang_ghep' || c.status === 'ghep_doi') {
+            const existing = candidateMap.get(codeKey);
+            if (!existing || existing.status === 'trong') {
+              candidateMap.set(codeKey, c);
+            }
+          }
+          // Nếu c.status === 'trong', TUYỆT ĐỐI KHÔNG THÊM VÀO ĐỂ KHÔNG HIỆN RA Ô TRỐNG!
+          return;
+        }
+
+        if (c.status === 'san_sang_ghep') {
+          candidateMap.set(codeKey, c);
+        }
+        return;
+      }
+
+      // 3. Quy tắc cốt lõi khi thao tác tại Ô Đực:
+      if (isCurrentMale) {
+        // Thao tác tại ô Đực -> CHỈ CẦN HIỆN Ô CÁI TRỐNG (hoặc ô cái đã ghép trước đó)
+        if (!isFemaleCageCheck(c)) return;
+
+        if (isSelectedPartner) {
+          if (c.status === 'trong' || c.status === 'ghep_doi') {
+            candidateMap.set(codeKey, c);
+          }
+          return;
+        }
+
+        if (c.status === 'trong') {
+          candidateMap.set(codeKey, c);
+        }
+        return;
+      }
+
+      // Fallback an toàn:
+      const isMaleReady = isMaleCageCheck(c) && c.status === 'san_sang_ghep';
+      const isFemaleEmpty = isFemaleCageCheck(c) && c.status === 'trong';
+      if (isMaleReady || isFemaleEmpty) {
+        candidateMap.set(codeKey, c);
+      }
+    });
+
+    return Array.from(candidateMap.values()).sort((a, b) => {
+      // Đưa ô đang chọn lên đầu (nếu có)
+      const aIsCurrent = data.partnerCageCode && a.code.toUpperCase() === data.partnerCageCode.trim().toUpperCase();
+      const bIsCurrent = data.partnerCageCode && b.code.toUpperCase() === data.partnerCageCode.trim().toUpperCase();
+      if (aIsCurrent && !bIsCurrent) return -1;
+      if (!aIsCurrent && bIsCurrent) return 1;
+
+      // Sắp xếp tự nhiên theo mã ô (VD: DĐ1-H1-001, DC1-H1-001...)
+      return a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' });
+    });
+  }, [areaCages, currentCageId, currentCageCode, data.partnerCageCode, isCurrentFemale, isCurrentMale]);
+
+  // Tìm thông tin chi tiết của ô đối tác đã chọn (nếu có)
+  const selectedPartnerCage = useMemo(() => {
+    if (!data.partnerCageCode) return null;
+    const targetCode = data.partnerCageCode.trim().toUpperCase();
+
+    const resolveBestMatch = (candidates: FarmCage[]): FarmCage | null => {
+      if (!candidates || candidates.length === 0) return null;
+      // 1. Ưu tiên tuyệt đối ô đang ghép đôi (ghep_doi) hoặc có thông tin liên kết trực tiếp
+      const paired = candidates.find(c => c.status === 'ghep_doi' || (c.partnerCageCode && c.partnerCageCode.trim().toUpperCase() === (currentCageCode || '').trim().toUpperCase()));
+      if (paired) return paired;
+
+      // 2. Ưu tiên ô đang hoạt động / sẵn sàng ghép / có dúi / có lịch sử
+      const active = candidates.find(c => c.status !== 'trong' || (c.ratCount || 0) > 0 || (c.history && c.history.length > 0));
+      if (active) return active;
+
+      // 3. Nếu không có ô nào có dữ liệu mới trả về ô trống đầu tiên
+      return candidates[0];
+    };
+
+    // 1. Tìm trong khu vực hiện tại
+    const inArea = areaCages.filter(c => c.code.trim().toUpperCase() === targetCode);
+    const bestInArea = resolveBestMatch(inArea);
+    if (bestInArea) return bestInArea;
+
+    // 2. Tìm trong toàn bộ trang trại nếu không tìm thấy trong khu
+    const inFarm = existingCages.filter(c => c.code.trim().toUpperCase() === targetCode);
+    return resolveBestMatch(inFarm);
+  }, [data.partnerCageCode, areaCages, existingCages, currentCageCode]);
+
+  // Lọc danh sách ô đực / cái theo đúng khu vực để gợi ý cho tách đực / tách cái
+  const maleCages = areaCages.filter(c => c.gender === 'duc' || c.code.startsWith('DĐ') || c.code.startsWith('D'));
+  const femaleCages = areaCages.filter(c => c.gender === 'cai' || c.code.startsWith('DC') || c.code.startsWith('C'));
   const babyCages = existingCages.filter(c => c.areaKind === 'baby' || c.code.startsWith('BB'));
 
   return (
@@ -305,14 +484,12 @@ export const FarmStatusBusinessForm: React.FC<FarmStatusBusinessFormProps> = ({
                 Dòng giống Dúi
               </label>
               <select
-                value={data.species}
+                value={data.species === 'ma_dao' ? 'ma_dao' : 'moc_dai'}
                 onChange={e => onChange({ species: e.target.value as DuiSpecies })}
                 className="w-full px-3 py-1.5 rounded-xl border border-slate-300 bg-white font-medium"
               >
-                <option value="moc_dai">Dúi Mốc Đại</option>
+                <option value="moc_dai">Dúi Mốc</option>
                 <option value="ma_dao">Dúi Má Đào</option>
-                <option value="moc_nho">Dúi Mốc Nhỏ</option>
-                <option value="bach_tang">Dúi Bạch Tạng</option>
               </select>
             </div>
 
@@ -410,9 +587,14 @@ export const FarmStatusBusinessForm: React.FC<FarmStatusBusinessFormProps> = ({
       {/* Nghiệp vụ 1: Ghép đôi (ghep_doi) */}
       {data.status === 'ghep_doi' && (
         <div className="p-3.5 sm:p-4 rounded-2xl bg-pink-50/70 border border-pink-200 space-y-3">
-          <div className="flex items-center gap-2 pb-2 border-b border-pink-100">
-            <Heart className="w-4 h-4 text-pink-600" />
-            <span className="font-bold text-pink-950 text-xs">NGHIỆP VỤ PHỐI GHÉP ĐÔI</span>
+          <div className="flex items-center justify-between pb-2 border-b border-pink-100">
+            <div className="flex items-center gap-2">
+              <Heart className="w-4 h-4 text-pink-600" />
+              <span className="font-bold text-pink-950 text-xs">NGHIỆP VỤ PHỐI GHÉP ĐÔI</span>
+            </div>
+            <span className="text-[10px] font-bold text-pink-700 bg-pink-100/90 px-2 py-0.5 rounded-md border border-pink-200">
+              {currentAreaName}
+            </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -429,31 +611,96 @@ export const FarmStatusBusinessForm: React.FC<FarmStatusBusinessFormProps> = ({
               />
             </div>
 
-            <div>
-              <label className="font-bold text-slate-700 block mb-1">
-                Chọn Ô Đối Ứng (Đối tác phối) *
-              </label>
-              <input
-                type="text"
-                placeholder="VD: D1-01 hoặc C1-02"
-                value={data.partnerCageCode}
-                onChange={e => onChange({ partnerCageCode: e.target.value.toUpperCase() })}
-                list="partner-cages-list"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold uppercase"
-                required
-              />
-              <datalist id="partner-cages-list">
-                {maleCages.map(c => (
-                  <option key={c.id} value={c.code}>
-                    {c.code} (♂ {c.species} - {c.currentWeightKg || 2.0}kg)
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="font-bold text-slate-700 block text-xs">
+                  {isCurrentFemale 
+                    ? 'Chọn Ô Đực Đối Ứng (Sẵn sàng ghép) *' 
+                    : (isCurrentMale ? 'Chọn Ô Cái Trống Đối Ứng *' : 'Chọn Ô Đối Ứng *')}
+                </label>
+                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded-md border border-emerald-200">
+                  {partnerCandidates.length} {isCurrentFemale ? 'ô đực sẵn sàng' : (isCurrentMale ? 'ô cái trống' : 'ô khả dụng')} trong khu
+                </span>
+              </div>
+
+              {partnerCandidates.length > 0 ? (
+                <select
+                  value={data.partnerCageCode || ''}
+                  onChange={e => onChange({ partnerCageCode: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-pink-300 bg-white font-bold text-slate-900 text-xs focus:border-pink-500 focus:outline-hidden shadow-2xs"
+                  required
+                >
+                  <option value="">
+                    {isCurrentFemale 
+                      ? '-- Chọn ô đực sẵn sàng ghép trong khu --' 
+                      : (isCurrentMale ? '-- Chọn ô cái trống trong khu --' : '-- Chọn ô đối ứng trong khu --')}
                   </option>
-                ))}
-                {femaleCages.map(c => (
-                  <option key={c.id} value={c.code}>
-                    {c.code} (♀ {c.species} - {c.currentWeightKg || 1.8}kg)
-                  </option>
-                ))}
-              </datalist>
+                  {partnerCandidates.map(c => {
+                    const isTrong = c.status === 'trong';
+                    const genderBadge = isMaleCageCheck(c) ? '♂ Đực' : (isFemaleCageCheck(c) ? '♀ Cái' : 'Cá thể');
+                    const weightBadge = c.currentWeightKg ? ` • ${c.currentWeightKg}kg` : '';
+                    const statusText = isTrong 
+                      ? (isFemaleCageCheck(c) ? '📦 Ô Cái trống' : '📦 Ô trống') 
+                      : `${genderBadge} • Sẵn sàng ghép${weightBadge}`;
+                    return (
+                      <option key={c.id} value={c.code}>
+                        Ô {c.code} [{statusText}]
+                      </option>
+                    );
+                  })}
+                </select>
+              ) : (
+                <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs space-y-1.5">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>
+                      {isCurrentFemale 
+                        ? 'Không có ô đực nào trong khu đang "Sẵn sàng ghép"!' 
+                        : (isCurrentMale 
+                            ? 'Không có ô cái nào trong khu đang "Trống"!' 
+                            : 'Không có ô đối ứng phù hợp trong khu!')}
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder={isCurrentFemale ? 'Nhập mã ô đực (VD: DĐ1-H1-001)' : 'Nhập mã ô cái trống (VD: DC1-H1-001)'}
+                    value={data.partnerCageCode || ''}
+                    onChange={e => onChange({ partnerCageCode: e.target.value.toUpperCase() })}
+                    className="w-full px-3 py-1.5 rounded-lg border border-amber-300 bg-white font-mono font-bold uppercase text-xs"
+                    required
+                  />
+                </div>
+              )}
+
+              {/* Thẻ hiển thị ô đối ứng đã chọn */}
+              {selectedPartnerCage && (
+                <div className="p-2.5 rounded-xl bg-white/95 border border-pink-200 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] shadow-2xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-pink-500 shrink-0"></span>
+                    <span className="font-bold font-mono text-pink-950">
+                      Ô {selectedPartnerCage.code}
+                    </span>
+                    <span className="text-slate-600 truncate">
+                      {isCurrentFemale ? (
+                        `(${isMaleCageCheck(selectedPartnerCage) ? '♂ Đực' : 'Đối tác'} • ${
+                          selectedPartnerCage.status === 'san_sang_ghep'
+                            ? 'Sẵn sàng ghép'
+                            : selectedPartnerCage.status === 'ghep_doi'
+                            ? 'Đang ghép đôi'
+                            : selectedPartnerCage.statusLabel || 'Sẵn sàng ghép'
+                        }${selectedPartnerCage.currentWeightKg ? ` • ${selectedPartnerCage.currentWeightKg}kg` : ''})`
+                      ) : selectedPartnerCage.status === 'trong' ? (
+                        `(📦 Ô Cái trống - Sẽ chuyển sang Ghép đôi cùng Ô ${currentCageCode || 'này'})`
+                      ) : (
+                        `(${isMaleCageCheck(selectedPartnerCage) ? '♂ Đực' : '♀ Cái'} • ${selectedPartnerCage.statusLabel || 'Sẵn sàng ghép'}${selectedPartnerCage.currentWeightKg ? ` • ${selectedPartnerCage.currentWeightKg}kg` : ''})`
+                      )}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-pink-700 font-bold px-1.5 py-0.5 rounded bg-pink-50 self-start sm:self-auto shrink-0">
+                    {currentAreaName}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -505,10 +752,104 @@ export const FarmStatusBusinessForm: React.FC<FarmStatusBusinessFormProps> = ({
               <datalist id="male-cages-list">
                 {maleCages.map(c => (
                   <option key={c.id} value={c.code}>
-                    {c.code} ({c.species} - {c.currentWeightKg || 2.0}kg)
+                    {c.code} ({c.species === 'ma_dao' ? 'Dúi Má Đào' : 'Dúi Mốc'} - {c.currentWeightKg || 2.0}kg)
                   </option>
                 ))}
               </datalist>
+            </div>
+
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">
+                Thời gian theo dõi (ngày)
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="120"
+                placeholder="60"
+                value={data.followupDurationDays ?? ''}
+                onChange={e => {
+                  const raw = e.target.value;
+                  const dur = raw === '' ? '' : (parseInt(raw, 10) || '');
+                  const sepDate = data.matingSeparationDate || new Date().toISOString().split('T')[0];
+                  const d = new Date(sepDate);
+                  if (typeof dur === 'number') {
+                    d.setDate(d.getDate() + dur);
+                  }
+                  onChange({
+                    followupDurationDays: dur,
+                    expectedEvaluationDate: typeof dur === 'number' ? d.toISOString().split('T')[0] : data.expectedEvaluationDate
+                  });
+                }}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold"
+              />
+            </div>
+
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">
+                Ngày dự kiến đánh giá / Kiểm tra kết quả
+              </label>
+              <input
+                type="date"
+                value={data.expectedEvaluationDate}
+                onChange={e => onChange({ expectedEvaluationDate: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-amber-300 bg-white font-bold text-amber-900"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Nghiệp vụ 2B: Tách đực (Không rõ đực) / Chờ kết quả (moi_tach_duc_khong_ro) */}
+      {data.status === 'moi_tach_duc_khong_ro' && (
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-50/80 border-2 border-amber-300 space-y-3 shadow-2xs">
+          <div className="flex items-center justify-between pb-2 border-b border-amber-200">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-amber-700" />
+              <span className="font-bold text-amber-950 text-xs">NGHIỆP VỤ THEO DÕI SAU TÁCH ĐỰC (KHÔNG RÕ ĐỰC) • 45 - 60 NGÀY</span>
+            </div>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-200 text-amber-900 border border-amber-300">
+              Chưa rõ đực phối
+            </span>
+          </div>
+
+          <div className="p-2.5 rounded-xl bg-white/90 border border-amber-200 text-slate-700 text-[11px] leading-relaxed">
+            💡 <strong>Ghi chú nghiệp vụ:</strong> Dúi cái thực tế đã tách đực nhưng chưa rõ thông tin ô đực phối giống. Hệ thống sẽ bỏ qua yêu cầu liên kết ô đực và tự động theo dõi chu kỳ mang thai, nhắc lịch kiểm tra thai (+45 đến 60 ngày) tương tự các ô cái khác.
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">
+                Ngày tách đực *
+              </label>
+              <input
+                type="date"
+                value={data.matingSeparationDate}
+                onChange={e => {
+                  const sepDate = e.target.value;
+                  const dur = data.followupDurationDays || 60;
+                  const d = new Date(sepDate);
+                  d.setDate(d.getDate() + dur);
+                  onChange({
+                    matingSeparationDate: sepDate,
+                    expectedEvaluationDate: d.toISOString().split('T')[0]
+                  });
+                }}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-medium"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">
+                Ô Đực đã phối giống
+              </label>
+              <input
+                type="text"
+                disabled
+                value="Không rõ đực / Chưa xác định"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-100 text-slate-500 font-medium italic cursor-not-allowed"
+              />
             </div>
 
             <div>

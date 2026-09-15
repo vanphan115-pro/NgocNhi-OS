@@ -19,7 +19,8 @@ import {
   Crown,
   KeyRound,
   Settings,
-  Bell
+  Bell,
+  QrCode
 } from 'lucide-react';
 import { AdminNotificationMenu } from './AdminNotificationMenu';
 import { AdminAlertPayload } from '../utils/notificationSound';
@@ -31,6 +32,7 @@ interface HeaderProps {
   onToggleRole: (role: UserRole) => void;
   onOpenLookupModal: () => void;
   onOpenAdminLogin?: (reason?: string) => void;
+  onOpenSystemQR?: () => void;
   pendingBookingsCount: number;
   pendingWeddingCount: number;
   notifications?: AdminAlertPayload[];
@@ -47,6 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleRole,
   onOpenLookupModal,
   onOpenAdminLogin,
+  onOpenSystemQR,
   pendingBookingsCount,
   pendingWeddingCount,
   notifications = [],
@@ -237,6 +240,19 @@ export const Header: React.FC<HeaderProps> = ({
               onMarkAllRead={onMarkAllNotificationsRead}
             />
 
+            {/* Mã QR Hệ Thống (Cả Khách & Admin đều thấy) */}
+            {onOpenSystemQR && (
+              <button
+                onClick={onOpenSystemQR}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-50 to-amber-100 hover:from-amber-100 hover:to-amber-200 text-amber-900 border border-amber-300 shadow-2xs transition-all hover:scale-[1.02] cursor-pointer"
+                title="Xem & in mã QR Tổng của toàn bộ Hệ thống Dịch vụ Ngọc Nhi"
+                id="header-system-qr-button"
+              >
+                <QrCode className="w-3.5 h-3.5 text-amber-700" />
+                <span>QR Hệ Thống</span>
+              </button>
+            )}
+
             {/* Tra Cứu Mã Đặt Nhanh */}
             <button
               onClick={onOpenLookupModal}
@@ -296,6 +312,17 @@ export const Header: React.FC<HeaderProps> = ({
               onMarkAllRead={onMarkAllNotificationsRead}
             />
 
+            {onOpenSystemQR && (
+              <button
+                onClick={onOpenSystemQR}
+                className="p-2 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 cursor-pointer shadow-2xs"
+                title="Xem & in mã QR Hệ Thống"
+                id="header-mobile-system-qr-button"
+              >
+                <QrCode className="w-4 h-4 text-amber-700" />
+              </button>
+            )}
+
             <button
               onClick={onOpenLookupModal}
               className="p-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200"
@@ -330,6 +357,23 @@ export const Header: React.FC<HeaderProps> = ({
               Hotline Kỹ Thuật: <a href={`tel:${MANAGERS.dungKaka.phones[0]}`} className="text-emerald-700 font-bold font-mono">{MANAGERS.dungKaka.phones[0]}</a>
             </div>
           </div>
+
+          {onOpenSystemQR && (
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onOpenSystemQR();
+              }}
+              className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold shadow-2xs hover:bg-amber-100"
+            >
+              <div className="flex items-center gap-2.5">
+                <QrCode className="w-4 h-4 text-amber-700" />
+                <span>Xem & In Mã QR Tổng Hệ Thống</span>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200/60 text-amber-950 font-bold">Mở QR</span>
+            </button>
+          )}
 
           <div className="grid grid-cols-1 gap-1">
             {navItems.map((item) => {

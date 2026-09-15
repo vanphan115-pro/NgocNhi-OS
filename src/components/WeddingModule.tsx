@@ -39,6 +39,55 @@ import { WeddingCustomersView } from './wedding/WeddingCustomersView';
 import { WeddingQuickQuoteView } from './wedding/WeddingQuickQuoteView';
 import { WeddingPromotionsView } from './wedding/WeddingPromotionsView';
 import { WeddingContactView } from './wedding/WeddingContactView';
+import { ModuleChatWidget, QuickPrompt } from './chat/ModuleChatWidget';
+
+const WEDDING_QUICK_PROMPTS: QuickPrompt[] = [
+  {
+    label: '💍 Báo giá bàn tiệc',
+    question: 'Tôi muốn xin bảng báo giá các gói tiệc cưới trọn gói?',
+    answer: 'Ngọc Nhi cung cấp 4 gói bàn tiệc chuẩn:\n• Gói Hạnh Phúc (Silver): 2.200.000đ/bàn (6 món đặc sản)\n• Gói Như Ý (Gold): 2.800.000đ/bàn (Kèm bia & nước ngọt)\n• Gói Uyên Ương (Diamond): 3.600.000đ/bàn (Sảnh VIP + Hoa tươi)\n• Gói Hoàng Gia (Royal): 4.800.000đ/bàn (Thực đơn Dúi & Hải sản cao cấp).'
+  },
+  {
+    label: '🏰 Xem sảnh tiệc',
+    question: 'Trung tâm có những sảnh tiệc nào và sức chứa bao nhiêu khách?',
+    answer: 'Ngọc Nhi có 2 không gian chính:\n1. Sảnh Ngọc Nhi 1 (Grand Ballroom): Sức chứa 300 - 500 khách, âm thanh ánh sáng LED 4K sân khấu hiện đại.\n2. Sảnh Sân Vườn Romance: Không gian mở ngoài trời lãng mạn cho 150 - 350 khách.'
+  },
+  {
+    label: '🍲 Nấu tiệc tận nhà',
+    question: 'Nhà hàng có nhận nấu tiệc cưới/thôi nôi tận nhà không?',
+    answer: 'Có ạ! Chúng tôi nhận nấu tiệc tại gia từ 3 bàn trở lên tại TP. Đồng Nai và lân cận, đầy đủ bàn ghế, dụng cụ tiệc cao cấp và nhân viên phục vụ tận tình, nóng sốt tại chỗ.'
+  },
+  {
+    label: '🎁 Ưu đãi cưới mùa này',
+    question: 'Hiện có chương trình khuyến mãi hay quà tặng gì cho tiệc cưới không?',
+    answer: '🎁 Đặt từ 15 bàn: Tặng MC dẫn chương trình + Tháp ly sâm panh + Bánh kem 3 tầng.\n🎁 Đặt từ 25 bàn: Tặng thêm gói trang trí hoa tươi đường dẫn sân khấu + Ban nhạc đón khách.\n🎁 Đặt cọc giữ ngày sớm: Giảm ngay 5% trên tổng hóa đơn!'
+  },
+  {
+    label: '📞 Hotline tư vấn',
+    question: 'Làm sao để đặt lịch xem sảnh và thử món trực tiếp?',
+    answer: 'Quý khách vui lòng gọi Hotline 0967.823.801 hoặc 0969.310.601, hoặc bấm nút "Mở form đặt tiệc nhanh" trên khung chat để chuyên viên xếp lịch đón tiếp chu đáo nhất ạ!'
+  }
+];
+
+const handleWeddingChatResponse = (text: string): string | null => {
+  const lower = text.toLowerCase();
+  if (lower.includes('giá') || lower.includes('báo giá') || lower.includes('bàn tiệc') || lower.includes('chi phí') || lower.includes('gói') || lower.includes('bao nhiêu')) {
+    return `Ngọc Nhi hiện phục vụ 4 gói tiệc cưới trọn gói chuẩn:\n• Gói Hạnh Phúc: 2.200.000đ/bàn (6 món đặc sản)\n• Gói Như Ý: 2.800.000đ/bàn (Kèm bia & nước ngọt)\n• Gói Uyên Ương: 3.600.000đ/bàn (Sảnh VIP + Hoa tươi)\n• Gói Hoàng Gia: 4.800.000đ/bàn (Thực đơn Dúi & Hải sản cao cấp)\nQuý khách có thể bấm "Mở form đặt tiệc nhanh" ngay góc trên khung chat để gửi yêu cầu đặt ngày nhé!`;
+  }
+  if (lower.includes('sảnh') || lower.includes('không gian') || lower.includes('khách') || lower.includes('sân khấu') || lower.includes('âm thanh') || lower.includes('led')) {
+    return `Trung tâm Tiệc Cưới Ngọc Nhi sở hữu 2 không gian sảnh tiệc nổi bật:\n1. Sảnh Ngọc Nhi 1 (Grand Ballroom): Sức chứa 300 - 500 khách, trần cao lộng lẫy, màn hình LED 4K và dàn âm thanh hiện đại.\n2. Sảnh Sân Vườn Romance: Không gian mở thoáng đãng, lãng mạn cho 150 - 350 khách.\nKính mời quý khách liên hệ hotline 0967.823.801 để đặt lịch xem sảnh thực tế!`;
+  }
+  if (lower.includes('nấu') || lower.includes('tại gia') || lower.includes('tại nhà') || lower.includes('đám cưới nhà') || lower.includes('thôi nôi') || lower.includes('tân gia') || lower.includes('lưu động')) {
+    return `Dịch vụ Nấu tiệc tận nhà của Ngọc Nhi nhận phục vụ từ 3 bàn trở lên tại TP. Đồng Nai và khu vực lân cận:\n• Cung cấp trọn gói bàn ghế inox/chiavari, chén dĩa sứ cao cấp, nhân viên phục vụ tận tình.\n• Bếp trưởng chế biến nóng sốt tại nhà bạn, đảm bảo tiêu chuẩn ATVSTP 100%.`;
+  }
+  if (lower.includes('ưu đãi') || lower.includes('quà') || lower.includes('khuyến mãi') || lower.includes('giảm giá')) {
+    return `Chương trình quà tặng tiệc cưới mùa này tại Ngọc Nhi:\n🎁 Đặt từ 15 bàn: Tặng MC chuyên nghiệp + Tháp sâm panh + Bánh kem 3 tầng.\n🎁 Đặt từ 25 bàn: Tặng thêm gói hoa tươi lối đi sân khấu + Ban nhạc đón khách.\n🎁 Đặt cọc giữ ngày sớm: Giảm ngay 5% trên tổng hóa đơn dịch vụ!`;
+  }
+  if (lower.includes('địa chỉ') || lower.includes('ở đâu') || lower.includes('vị trí')) {
+    return `Địa chỉ Trung tâm Tiệc Cưới & Quán Ăn Ngọc Nhi:\n📍 Khu phố 9, phường Lộc Ninh, TP. Đồng Nai.\n📞 Hotline tư vấn: 0967.823.801 - 0969.310.601\nRất hân hạnh được đón tiếp quý khách!`;
+  }
+  return null;
+};
 
 export interface WeddingModuleProps {
   userRole: UserRole;
@@ -607,6 +656,23 @@ export const WeddingModule: React.FC<WeddingModuleProps> = ({
           </div>
         </div>
       )}
+
+      {/* Floating Chat Tư vấn Trực tuyến Phân Hệ Tiệc Cưới */}
+      <ModuleChatWidget
+        module="wedding"
+        title="Tư Vấn Tiệc Cưới & Sự Kiện Ngọc Nhi"
+        subtitle="Quản lý Ngọc Nhi • Hỗ trợ 24/7"
+        avatarIcon={<Sparkles className="w-5 h-5 text-amber-200" />}
+        headerGradientClass="bg-gradient-to-r from-rose-700 via-pink-700 to-amber-700"
+        accentColorClass="bg-rose-600 hover:bg-rose-700"
+        hotline="0967823801"
+        hotlineFormatted="0967.823.801 - 0969.310.601"
+        initialMessage="Kính chào quý khách! Trung tâm Tiệc Cưới & Sự Kiện Ngọc Nhi rất vinh hạnh được đồng hành cùng ngày trọng đại của bạn. Chúng tôi cung cấp các gói bàn tiệc trọn gói, sảnh tiệc lộng lẫy, thực đơn đa dạng và dịch vụ nấu tiệc tại gia. Quý khách cần hỗ trợ tư vấn ngày nào ạ?"
+        quickPrompts={WEDDING_QUICK_PROMPTS}
+        smartResponseHandler={handleWeddingChatResponse}
+        onSpecialAction={() => setIsBookingModalOpen(true)}
+        specialActionLabel="Mở form gửi thông tin đặt tiệc nhanh"
+      />
     </div>
   );
 };

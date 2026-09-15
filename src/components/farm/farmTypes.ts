@@ -2,7 +2,7 @@ export type FarmNavTab = 'home' | 'areas' | 'marketplace' | 'tasks' | 'treatment
 
 export type AreaKind = 'sinh_san' | 'baby' | 'hau_bi' | 'thuong_pham' | 'dieu_tri';
 
-export type DuiSpecies = 'moc_dai' | 'ma_dao' | 'moc_nho' | 'bach_tang';
+export type DuiSpecies = 'moc' | 'ma_dao' | 'moc_dai' | 'moc_nho' | 'bach_tang';
 
 export type BabyWeightGroup = '3_4_lang' | '5_7_lang' | '8_lang_1_1_kg';
 
@@ -11,11 +11,12 @@ export type BreedingCageStatus =
   | 'trong' 
   | 'san_sang_ghep' 
   | 'ghep_doi' 
-  | 'moi_tach_duc'      // Mới tách đực / Chờ kết quả (Ô Cái, theo dõi 45-60 ngày)
-  | 'moi_tach_cai'      // Mới tách cái / Chờ đánh giá (Ô Đực, sau đủ 10 ngày tự động Sẵn sàng ghép)
-  | 'moi_tach_con'      // Mới tách con / Đang dưỡng (Ô Cái, chu kỳ 10 ngày kiểm tra sức khỏe)
-  | 'dang_nuoi_con'     // Đang nuôi con
-  | 'dang_dieu_tri';    // Đang điều trị bệnh
+  | 'moi_tach_duc'          // Mới tách đực / Chờ kết quả (Ô Cái, theo dõi 45-60 ngày)
+  | 'moi_tach_duc_khong_ro' // Tách đực (Không rõ đực) / Chờ kết quả (Ô Cái, theo dõi 45-60 ngày)
+  | 'moi_tach_cai'          // Mới tách cái / Chờ đánh giá (Ô Đực, sau đủ 10 ngày tự động Sẵn sàng ghép)
+  | 'moi_tach_con'          // Mới tách con / Đang dưỡng (Ô Cái, chu kỳ 10 ngày kiểm tra sức khỏe)
+  | 'dang_nuoi_con'         // Đang nuôi con
+  | 'dang_dieu_tri';        // Đang điều trị bệnh
 
 // Bộ trạng thái Ô Baby
 export type BabyCageStatus =

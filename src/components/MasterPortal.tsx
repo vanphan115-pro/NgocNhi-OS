@@ -39,9 +39,12 @@ import {
   Sparkle, 
   Heart, 
   Quote,
-  QrCode 
+  QrCode,
+  Bell
 } from 'lucide-react';
 import { UniversalQRModal } from './farm/UniversalQRModal';
+import { subscribeToDecisions, getLocalDecisions } from '../services/aiDecisionService';
+import { AIDecisionRequest } from '../types';
 
 interface MasterPortalProps {
   onNavigate: (view: AppView) => void;
@@ -69,9 +72,55 @@ export const MasterPortal: React.FC<MasterPortalProps> = ({
   onUpdateWeddingStatus = () => {},
 }) => {
   const [showSystemQRModal, setShowSystemQRModal] = useState(false);
+  const [pendingDecisions, setPendingDecisions] = useState<AIDecisionRequest[]>(() => {
+    return getLocalDecisions().filter(d => d.status === 'pending');
+  });
+
+  React.useEffect(() => {
+    const unsub = subscribeToDecisions((all) => {
+      setPendingDecisions(all.filter(d => d.status === 'pending'));
+    });
+    return unsub;
+  }, []);
+
+  const pendingRestaurantOrdersCount = orders.filter(o => o.status === 'pending' || o.status === 'waiting_weighing' || (o.status as string) === 'weighing_required').length;
+  const totalPendingAlerts = pendingDecisions.length + pendingRestaurantOrdersCount + pendingBookingsCount + pendingWeddingCount;
 
   return (
     <div className="space-y-16 pb-20">
+      {/* CẢNH BÁO TRANG CHỦ / HỆ THỐNG: KHI CÓ KHÁCH HÀNG CHỐT ĐẶT CẦN PHÊ DUYỆT */}
+      {totalPendingAlerts > 0 && (
+        <div className="rounded-3xl p-5 sm:p-6 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-slate-950 shadow-2xl border-2 border-amber-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in slide-in-from-top duration-300">
+          <div className="flex items-start sm:items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-white text-amber-600 flex items-center justify-center font-black shrink-0 shadow-lg animate-bounce">
+              <Bell className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap mb-1">
+                <span className="px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider animate-pulse">
+                  Cảnh Báo Quản Trị Hệ Thống
+                </span>
+                <span className="font-extrabold text-sm sm:text-base text-slate-950">
+                  Có {totalPendingAlerts} yêu cầu chốt đặt / đơn dịch vụ mới từ khách hàng cần phê duyệt
+                </span>
+              </div>
+              <p className="text-xs text-slate-950/85 font-medium leading-relaxed">
+                Khách hàng đã xác nhận chốt đặt ({pendingDecisions.length} yêu cầu tư vấn chốt đơn, {pendingBookingsCount} bàn mới, {pendingRestaurantOrdersCount} đơn món, {pendingWeddingCount} tiệc cưới). Quản trị viên vui lòng kiểm tra và duyệt phục vụ.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+            <button
+              onClick={() => onNavigate('admin')}
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 text-amber-300 font-bold text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+            >
+              <span>Xem & Phê Duyệt Ngay</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 1. Hero Master Ecosystem Banner (Bright, Luminous, High-Contrast Luxury) */}
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-amber-500/10 via-white to-rose-500/10 border border-amber-200/80 p-8 sm:p-12 lg:p-14 shadow-xl">
         <div className="absolute top-0 right-0 -mt-16 -mr-16 w-96 h-96 bg-amber-400/20 rounded-full blur-3xl pointer-events-none" />
@@ -93,7 +142,7 @@ export const MasterPortal: React.FC<MasterPortalProps> = ({
 
             <p className="text-base sm:text-lg text-slate-700 leading-relaxed font-normal">
               Chuỗi dịch vụ đa ngành hàng đầu tại <strong className="text-slate-900 font-bold">KP 9, phường Lộc Ninh, TP. Đồng Nai</strong>. 
-              Giao thoa hoàn hảo giữa ẩm thực đặc sản cao cấp, dịch vụ tiệc cưới hội nghị trọn gói sang trọng và trung tâm điều hành hiện đại.
+              Giao thoa hoàn hảo giữa ẩm thực đặc sản cao cấp, dịch vụ tiệc cưới hội nghị trọn gói sang trọng và Trang trại dúi hiện đại.
             </p>
 
             {/* Quick Hub Badges */}
@@ -153,17 +202,43 @@ export const MasterPortal: React.FC<MasterPortalProps> = ({
               )}
             </div>
 
-            {/* Quick Action Buttons: When user is admin, show the 3 synchronized management sections; otherwise show customer CTA buttons */}
+            {/* Quick Action Buttons: When user is admin, show the 3 synchronized management sections + QR Tổng; otherwise show customer CTA buttons + QR Tổng */}
             {userRole === 'admin' ? (
-              <MasterAdminHub
-                orders={orders}
-                bookings={bookings}
-                weddingInquiries={weddingInquiries}
-                onNavigate={onNavigate}
-                onUpdateOrderStatus={onUpdateOrderStatus}
-                onUpdateBookingStatus={onUpdateBookingStatus}
-                onUpdateWeddingStatus={onUpdateWeddingStatus}
-              />
+              <div className="space-y-3">
+                <MasterAdminHub
+                  orders={orders}
+                  bookings={bookings}
+                  weddingInquiries={weddingInquiries}
+                  onNavigate={onNavigate}
+                  onUpdateOrderStatus={onUpdateOrderStatus}
+                  onUpdateBookingStatus={onUpdateBookingStatus}
+                  onUpdateWeddingStatus={onUpdateWeddingStatus}
+                  onOpenSystemQR={() => setShowSystemQRModal(true)}
+                />
+
+                {/* Dành cho Quản trị viên: Nút mở & in mã QR Tổng Hệ Thống */}
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowSystemQRModal(true)}
+                    className="px-5 py-3 rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-sm shadow-md shadow-amber-500/25 flex items-center gap-2 transition-all hover:scale-[1.02] cursor-pointer"
+                    title="Xem & in mã QR Tổng của toàn bộ Hệ thống Dịch vụ Ngọc Nhi"
+                    id="admin-portal-system-qr-btn"
+                  >
+                    <QrCode className="w-4 h-4 text-slate-950" />
+                    <span>01 QR Tổng Hệ Thống (Xem & In Tem)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('operations')}
+                    className="px-4 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold text-sm border border-slate-700 shadow-sm flex items-center gap-2 transition-all hover:scale-[1.02] cursor-pointer"
+                  >
+                    <LayoutDashboard className="w-4 h-4 text-amber-400" />
+                    <span>Vào Trung Tâm Điều Hành</span>
+                  </button>
+                </div>
+              </div>
             ) : (
               <div className="flex flex-wrap items-center gap-3 pt-2">
                 <button

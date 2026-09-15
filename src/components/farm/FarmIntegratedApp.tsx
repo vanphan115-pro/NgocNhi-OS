@@ -18,7 +18,11 @@ import {
   FARM_PHOTOS,
   applyAutoStatusTransitions,
   reconcileBabyCagesFromWeanedMothers,
+  reconcileBreedingPairCages,
+  deduplicateCagesByCode,
+  normalizeFarmCage,
   generateAutoTasks,
+  extractRowNumber,
   formatDateVN,
   addDays,
   daysBetween
@@ -35,6 +39,58 @@ import { FarmSanitationModal } from './FarmSanitationModal';
 import { FarmQRModal, CageQRModal } from './FarmModals';
 import { UniversalQRModal } from './UniversalQRModal';
 import { ManageStructureModal } from './ManageStructureModal';
+import { ModuleChatWidget, QuickPrompt } from '../chat/ModuleChatWidget';
+
+const FARM_QUICK_PROMPTS: QuickPrompt[] = [
+  {
+    label: '💰 Báo giá con giống',
+    question: 'Giá con giống Dúi má đào và Dúi mốc lớn hiện tại bao nhiêu?',
+    answer: 'Trại Dúi KaKa cung cấp các dòng giống F1 khỏe mạnh:\n• Dúi mốc lớn (2-3 tháng): 1.200.000đ - 1.500.000đ/cặp\n• Dúi mốc hậu bị/chuẩn bị sinh sản: 1.800.000đ - 2.400.000đ/cặp\n• Dúi má đào Thái Lan F1: 2.500.000đ - 3.800.000đ/cặp\n*Tất cả giống đã được tiêm phòng, bao sinh sản và kèm cam kết bao tiêu đầu ra trọn đời.'
+  },
+  {
+    label: '📐 Kỹ thuật chuồng trại',
+    question: 'Kỹ thuật làm chuồng nuôi Dúi bằng gạch men như thế nào?',
+    answer: 'Quy cách chuẩn tại Trại Dúi KaKa:\n• Kích thước: 50x50cm hoặc 60x60cm, chiều cao tối thiểu 50cm.\n• Dùng gạch men bóng ốp mặt nhẵn vào trong để dúi không leo trèo được.\n• Đặt nơi yên tĩnh, thoáng mát mùa hè, ấm áp tránh gió lùa mùa đông (nhiệt độ lý tưởng 22-28°C).'
+  },
+  {
+    label: '🎋 Thức ăn & Dinh dưỡng',
+    question: 'Dúi ăn gì và chi phí thức ăn mỗi ngày có tốn kém không?',
+    answer: 'Chi phí thức ăn cho Dúi cực kỳ rẻ, chỉ khoảng 300 - 500đ/con/ngày:\n• Thức ăn chính (70%): Thân tre, mía, cỏ voi già giúp mài răng và bổ sung chất xơ.\n• Thức ăn tinh (30%): Bắp hạt khô, khoai lang, sắn củ.\n• Dúi hấp thụ nước từ thức ăn nên gần như không cần máng nước.'
+  },
+  {
+    label: '🤝 Chính sách bao tiêu đầu ra',
+    question: 'Trại có ký hợp đồng bao tiêu thu mua lại dúi thương phẩm không?',
+    answer: 'Có cam kết bao tiêu trọn đời! Bà con mua con giống tại Trại KaKa được ký hợp đồng thu mua dúi thịt với giá ổn định theo thị trường, hỗ trợ kỹ thuật và phòng trị bệnh 24/7 qua Hotline 0969.310.601.'
+  },
+  {
+    label: '📍 Xem giống tại trại',
+    question: 'Tôi muốn đến tham quan trại và chọn con giống trực tiếp thì đến đâu?',
+    answer: 'Kính mời bà con ghé thăm Trại Dúi KaKa (Phan Dũng) tại:\n📍 Khu phố 9, phường Lộc Ninh, TP. Đồng Nai.\n📞 Hotline Kỹ Thuật: 0969.310.601 (Anh Phan Dũng đón tiếp & hướng dẫn kỹ thuật tận tình).'
+  }
+];
+
+const handleFarmChatResponse = (text: string): string | null => {
+  const lower = text.toLowerCase();
+  if (lower.includes('giá') || lower.includes('bao nhiêu') || lower.includes('tiền') || lower.includes('mua giống') || lower.includes('con giống') || lower.includes('bán giống')) {
+    return `Bảng giá con giống chuẩn tại Trại Dúi KaKa (Phan Dũng):\n• Dúi mốc lớn giống: 1.200.000đ - 1.500.000đ/cặp\n• Dúi mốc hậu bị sinh sản: 1.800.000đ - 2.400.000đ/cặp\n• Dúi má đào Thái Lan/Việt F1: 2.500.000đ - 3.800.000đ/cặp\nBà con có thể bấm "Xem bảng giá & đặt giống online" ở phía trên để chọn cặp giống ưng ý!`;
+  }
+  if (lower.includes('chuồng') || lower.includes('gạch') || lower.includes('kích thước') || lower.includes('xây') || lower.includes('thiết kế')) {
+    return `Kỹ thuật thiết kế ô chuồng chuẩn:\n• Dùng gạch men khổ 50x50 hoặc 60x60cm, ốp mặt bóng vào bên trong.\n• Mỗi ô nuôi 1 con (hoặc 1 đực ghép 2-3 cái khi sinh sản).\n• Giữ nhiệt độ trại ổn định từ 22°C - 28°C, che chắn tránh ánh nắng chiếu trực tiếp.`;
+  }
+  if (lower.includes('ăn') || lower.includes('thức ăn') || lower.includes('uống') || lower.includes('mía') || lower.includes('tre') || lower.includes('bắp') || lower.includes('ngô')) {
+    return `Khẩu phần ăn của Dúi rất dễ tìm & tiết kiệm:\n• Cây tre, mía, cỏ voi già (chặt khúc 5-10cm) cho ăn hàng ngày.\n• Bắp hạt khô, khoai lang, sắn lát cho ăn dặm buổi chiều.\n• Tuyệt đối không cho ăn thức ăn ôi thiu, chua hỏng hoặc ướt để tránh đau bụng tiêu chảy.`;
+  }
+  if (lower.includes('bệnh') || lower.includes('thuốc') || lower.includes('tiêu chảy') || lower.includes('chữa') || lower.includes('phòng')) {
+    return `Kinh nghiệm phòng trị bệnh cho Dúi:\n• Bệnh phổ biến nhất là tiêu chảy. Khi phát hiện, bà con ngưng cho ăn thức ăn ướt, cho gặm đọt ổi non hoặc rễ cỏ xước và liên hệ ngay Hotline Kỹ Thuật 0969.310.601 để được anh Dũng hướng dẫn dùng thuốc thú y kịp thời.`;
+  }
+  if (lower.includes('bao tiêu') || lower.includes('đầu ra') || lower.includes('thu mua') || lower.includes('hợp đồng')) {
+    return `Chính sách bao tiêu của Trại Dúi KaKa:\n• Ký hợp đồng thu mua dúi thương phẩm lâu dài cho mọi khách hàng lấy giống tại trại.\n• Giá thu mua cam kết ổn định theo thị trường, không ép giá.\n• Tư vấn & hỗ trợ kỹ thuật nuôi trọn đời cho đến khi đàn giống sinh sản phát triển.`;
+  }
+  if (lower.includes('địa chỉ') || lower.includes('ở đâu') || lower.includes('vị trí') || lower.includes('tham quan') || lower.includes('đến trại')) {
+    return `Địa chỉ Trại Dúi KaKa (Phan Dũng):\n📍 Khu phố 9, phường Lộc Ninh, TP. Đồng Nai.\n📞 Hotline Kỹ Thuật: 0969.310.601 (Anh Phan Dũng trực tiếp tư vấn và đón tiếp).`;
+  }
+  return null;
+};
 import { 
   migrateFarmEntities, 
   resolveQrTargetFromUrl, 
@@ -89,13 +145,30 @@ export const FarmIntegratedApp: React.FC<FarmIntegratedAppProps> = ({
     const saved = localStorage.getItem('farm_cages_real_v3');
     if (saved) {
       try { 
-        const parsed = JSON.parse(saved);
-        const { updatedCages } = reconcileBabyCagesFromWeanedMothers(parsed);
-        return updatedCages;
+        const parsed: FarmCage[] = JSON.parse(saved);
+        // Tự động đồng bộ chuẩn hóa mã ô chuồng cũ: C1-01 -> DC1-H1-001, D1-01 -> DĐ1-H1-001
+        const migrated = parsed.map(c => {
+          let updated = { ...c };
+          if (updated.code === 'C1-01') updated = { ...updated, code: 'DC1-H1-001', tier: 1 };
+          if (updated.code === 'C1-02') updated = { ...updated, code: 'DC1-H1-002', tier: 1 };
+          if (updated.code === 'C1-03') updated = { ...updated, code: 'DC1-H1-003', tier: 1 };
+          if (updated.code === 'C1-04') updated = { ...updated, code: 'DC1-H2-001', tier: 2 };
+          if (updated.code === 'C1-05') updated = { ...updated, code: 'DC1-H2-002', tier: 2 };
+          if (updated.code === 'C2-01') updated = { ...updated, code: 'DC2-H1-001', tier: 1 };
+          if (updated.code === 'C2-02') updated = { ...updated, code: 'DC2-H1-002', tier: 1 };
+          if (updated.code === 'C2-03') updated = { ...updated, code: 'DC2-H2-001', tier: 2 };
+          if (updated.code === 'C2-04') updated = { ...updated, code: 'DC2-H2-002', tier: 2 };
+          if (updated.code === 'D1-01') updated = { ...updated, code: 'DĐ1-H1-001', tier: 1 };
+          if (updated.code === 'D1-02') updated = { ...updated, code: 'DĐ1-H1-002', tier: 1 };
+          if (updated.code === 'D1-03') updated = { ...updated, code: 'DĐ1-H1-003', tier: 1 };
+          return normalizeFarmCage(updated);
+        });
+        const { updatedCages } = reconcileBabyCagesFromWeanedMothers(migrated);
+        return deduplicateCagesByCode(reconcileBreedingPairCages(updatedCages));
       } catch (e) {}
     }
-    const { updatedCages } = reconcileBabyCagesFromWeanedMothers(INITIAL_CAGES);
-    return updatedCages;
+    const { updatedCages } = reconcileBabyCagesFromWeanedMothers(INITIAL_CAGES.map(normalizeFarmCage));
+    return deduplicateCagesByCode(reconcileBreedingPairCages(updatedCages));
   });
 
   const [areas, setAreas] = useState<FarmArea[]>(() => {
@@ -109,7 +182,22 @@ export const FarmIntegratedApp: React.FC<FarmIntegratedAppProps> = ({
   const [rows, setRows] = useState<FarmRow[]>(() => {
     const saved = localStorage.getItem('farm_rows_real_v3');
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
+      try { 
+        const parsed: FarmRow[] = JSON.parse(saved);
+        // Tự động chuẩn hóa mã Dãy Đực 1 (DĐ1) nếu lưu trữ cũ còn ghi DD1 hoặc D1
+        return parsed.map(r => {
+          if (r.id === 'row-ss1-d1' || r.code === 'DD1' || (r.name.includes('Đực 1') && r.code !== 'DĐ1')) {
+            return { ...r, code: 'DĐ1', genderBadge: '♂ Dãy Đực' };
+          }
+          if (r.id === 'row-ss1-c1' && r.code !== 'DC1') {
+            return { ...r, code: 'DC1', genderBadge: '♀ Dãy Cái' };
+          }
+          if (r.id === 'row-ss1-c2' && r.code !== 'DC2') {
+            return { ...r, code: 'DC2', genderBadge: '♀ Dãy Cái' };
+          }
+          return r;
+        });
+      } catch (e) {}
     }
     return INITIAL_ROWS;
   });
@@ -342,12 +430,89 @@ export const FarmIntegratedApp: React.FC<FarmIntegratedAppProps> = ({
     showToast('Đã xóa công việc khỏi lịch.');
   };
 
-  // Xử lý Cập nhật Ô (hỗ trợ cập nhật 2 ô đồng thời khi ghép/tách/chuyển đàn + tự động đồng bộ khi tách con)
+  // Xử lý Cập nhật Ô (hỗ trợ cập nhật 2 ô đồng thời khi ghép/tách/chuyển đàn + tự động đồng bộ khi tách con hoặc ghép đôi)
   const handleUpdateCage = (updatedCage: FarmCage, secondCageUpdate?: FarmCage) => {
     setCages(prev => {
       let next = prev.map(c => c.id === updatedCage.id ? updatedCage : c);
       if (secondCageUpdate) {
         next = next.map(c => c.id === secondCageUpdate.id ? secondCageUpdate : c);
+      } else if (updatedCage.status === 'ghep_doi' && updatedCage.partnerCageCode) {
+        // Tự động đồng bộ ô đối tác nếu chưa có secondCageUpdate (đặc biệt: thao tác tại ô đực ghép với ô cái trống)
+        const partnerCode = updatedCage.partnerCageCode.trim().toUpperCase();
+        const partnerMatches = next.filter(c => c.code.trim().toUpperCase() === partnerCode && c.id !== updatedCage.id);
+        const partner = (updatedCage.partnerCageId ? next.find(c => c.id === updatedCage.partnerCageId) : null)
+          || partnerMatches.find(c => c.status !== 'trong')
+          || partnerMatches[0];
+
+        if (partner) {
+          const todayStr = updatedCage.matingDate || new Date().toISOString().split('T')[0];
+          const isPartnerFemale = partner.gender === 'cai' || partner.code.toUpperCase().startsWith('DC') || (partner.rowCode || '').toUpperCase().startsWith('DC');
+          const isCurrentMale = updatedCage.gender === 'duc' || updatedCage.code.toUpperCase().startsWith('DĐ') || (updatedCage.rowCode || '').toUpperCase().startsWith('DĐ');
+          
+          if (isCurrentMale || !isPartnerFemale) {
+            // Ô Đực giữ cặp phối (2 con)
+            // Ô Cái chuyển sang Ô Đực -> về Trống do chuyển ghép (0 con)
+            const syncedPartner: FarmCage = {
+              ...partner,
+              status: 'trong',
+              statusLabel: 'Trống do chuyển ghép',
+              gender: 'cai',
+              ratCount: 0,
+              matingDate: todayStr,
+              partnerCageId: updatedCage.id,
+              partnerCageCode: updatedCage.code,
+              notes: `Dúi cái đã chuyển sang ghép đôi tại Ô Đực ${updatedCage.code} từ ngày ${formatDateVN(todayStr)}. Lịch tách ghép: +20 ngày.`,
+              history: [
+                {
+                  id: `his-${Date.now()}-pair-auto`,
+                  timestamp: `${todayStr} ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`,
+                  eventType: 'ghep_doi',
+                  summary: `Dúi cái chuyển sang ghép đôi tại Ô Đực ${updatedCage.code} từ ngày ${formatDateVN(todayStr)}. Ô cái tạm thời để trống do chuyển ghép trong thời gian phối giống. Lịch tách ghép dự kiến: +20 ngày (${formatDateVN(addDays(todayStr, 20))}).`,
+                  relatedCageCode: updatedCage.code,
+                  actor: 'Phan Dũng'
+                },
+                ...(partner.history || [])
+              ]
+            };
+            next = next.map(c => c.id === syncedPartner.id ? syncedPartner : (c.id === updatedCage.id ? { ...updatedCage, ratCount: 2 } : c));
+          } else {
+            // Thao tác tại Ô Cái: Ô Cái về Trống do chuyển ghép (0 con)
+            // Ô Đực giữ cặp phối (2 con)
+            const syncedPartner: FarmCage = {
+              ...partner,
+              status: 'ghep_doi',
+              statusLabel: 'Ghép đôi',
+              gender: 'duc',
+              ratCount: 2,
+              matingDate: todayStr,
+              partnerCageId: updatedCage.id,
+              partnerCageCode: updatedCage.code,
+              history: [
+                {
+                  id: `his-${Date.now()}-pair-auto`,
+                  timestamp: `${todayStr} ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`,
+                  eventType: 'ghep_doi',
+                  summary: `Bắt đầu ghép đôi: Dúi Cái từ Ô ${updatedCage.code} đã chuyển sang ghép chung tại Ô Đực này từ ngày ${formatDateVN(todayStr)}. Lịch tách ghép dự kiến: +20 ngày (${formatDateVN(addDays(todayStr, 20))}).`,
+                  relatedCageCode: updatedCage.code,
+                  actor: 'Phan Dũng'
+                },
+                ...(partner.history || [])
+              ]
+            };
+            const updatedFemaleCage: FarmCage = {
+              ...updatedCage,
+              status: 'trong',
+              statusLabel: 'Trống do chuyển ghép',
+              gender: 'cai',
+              ratCount: 0,
+              matingDate: todayStr,
+              partnerCageId: partner.id,
+              partnerCageCode: partner.code,
+              notes: `Dúi cái chuyển sang ghép đôi tại Ô Đực ${partner.code} từ ngày ${formatDateVN(todayStr)}. Lịch tách ghép: +20 ngày.`
+            };
+            next = next.map(c => c.id === syncedPartner.id ? syncedPartner : (c.id === updatedCage.id ? updatedFemaleCage : c));
+          }
+        }
       } else if (updatedCage.status === 'moi_tach_con' && (updatedCage.weanedBabyCount || 0) > 0) {
         // Tự động tìm ô baby và đồng bộ đàn con vào Khu Baby nếu chưa có secondCageUpdate
         const targetCode = (updatedCage.targetBabyCageCode || '').trim().toUpperCase();
@@ -393,9 +558,13 @@ export const FarmIntegratedApp: React.FC<FarmIntegratedAppProps> = ({
       return next;
     });
 
-    // Cập nhật modal đang mở nếu đang xem ô này
-    if (selectedCageForProfile && selectedCageForProfile.id === updatedCage.id) {
-      setSelectedCageForProfile(updatedCage);
+    // Cập nhật modal đang mở nếu đang xem ô này (theo ID hoặc theo Mã ô)
+    if (selectedCageForProfile) {
+      if (selectedCageForProfile.id === updatedCage.id || selectedCageForProfile.code.trim().toUpperCase() === updatedCage.code.trim().toUpperCase()) {
+        setSelectedCageForProfile(updatedCage);
+      } else if (secondCageUpdate && (selectedCageForProfile.id === secondCageUpdate.id || selectedCageForProfile.code.trim().toUpperCase() === secondCageUpdate.code.trim().toUpperCase())) {
+        setSelectedCageForProfile(secondCageUpdate);
+      }
     }
   };
 
@@ -441,7 +610,84 @@ export const FarmIntegratedApp: React.FC<FarmIntegratedAppProps> = ({
       physicalId: reg.physicalId
     };
 
-    setCages(prev => [...prev, finalCage]);
+    setCages(prev => {
+      // Nếu đã có ô cùng mã trong cùng phân khu, thay thế ô cũ để tránh nhân đôi
+      const filtered = prev.filter(c => !(c.areaId === finalCage.areaId && c.code.trim().toUpperCase() === finalCage.code.trim().toUpperCase()));
+      let next = [...filtered, finalCage];
+      if (finalCage.status === 'ghep_doi' && finalCage.partnerCageCode) {
+        const partnerCode = finalCage.partnerCageCode.trim().toUpperCase();
+        const partner = next.find(c => c.code.toUpperCase() === partnerCode && c.id !== finalCage.id);
+        if (partner) {
+          const todayStr = finalCage.matingDate || new Date().toISOString().split('T')[0];
+          const isPartnerFemale = partner.gender === 'cai' || partner.code.toUpperCase().startsWith('DC') || (partner.rowCode || '').toUpperCase().startsWith('DC');
+          const isCurrentMale = finalCage.gender === 'duc' || finalCage.code.toUpperCase().startsWith('DĐ') || (finalCage.rowCode || '').toUpperCase().startsWith('DĐ');
+          
+          if (isCurrentMale || !isPartnerFemale) {
+            // Ô Đực giữ cặp phối (2 con), Ô Cái về Trống do chuyển ghép (0 con)
+            const syncedPartner: FarmCage = {
+              ...partner,
+              status: 'trong',
+              statusLabel: 'Trống do chuyển ghép',
+              gender: 'cai',
+              ratCount: 0,
+              matingDate: todayStr,
+              partnerCageId: finalCage.id,
+              partnerCageCode: finalCage.code,
+              notes: `Dúi cái đã chuyển sang ghép đôi tại Ô Đực ${finalCage.code} từ ngày ${formatDateVN(todayStr)}. Lịch tách ghép: +20 ngày.`,
+              history: [
+                {
+                  id: `his-${Date.now()}-pair-add`,
+                  timestamp: `${todayStr} ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`,
+                  eventType: 'ghep_doi',
+                  summary: `Dúi cái đã chuyển sang ghép đôi tại Ô Đực ${finalCage.code} từ ngày ${formatDateVN(todayStr)}. Ô cái tạm thời để trống do chuyển ghép trong thời gian phối giống. Lịch tách ghép dự kiến: +20 ngày (${formatDateVN(addDays(todayStr, 20))}).`,
+                  relatedCageCode: finalCage.code,
+                  actor: 'Phan Dũng'
+                },
+                ...(partner.history || [])
+              ]
+            };
+            next = next.map(c => c.id === syncedPartner.id ? syncedPartner : (c.id === finalCage.id ? { ...finalCage, ratCount: 2 } : c));
+          } else {
+            // Thao tác tại Ô Cái: Ô Cái về Trống do chuyển ghép (0 con), Ô Đực giữ 2 con
+            const syncedPartner: FarmCage = {
+              ...partner,
+              status: 'ghep_doi',
+              statusLabel: 'Ghép đôi',
+              gender: 'duc',
+              ratCount: 2,
+              matingDate: todayStr,
+              partnerCageId: finalCage.id,
+              partnerCageCode: finalCage.code,
+              history: [
+                {
+                  id: `his-${Date.now()}-pair-add`,
+                  timestamp: `${todayStr} ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`,
+                  eventType: 'ghep_doi',
+                  summary: `Bắt đầu ghép đôi: Dúi Cái từ Ô ${finalCage.code} đã chuyển sang ghép chung tại Ô Đực này từ ngày ${formatDateVN(todayStr)}. Lịch tách ghép dự kiến: +20 ngày (${formatDateVN(addDays(todayStr, 20))}).`,
+                  relatedCageCode: finalCage.code,
+                  actor: 'Phan Dũng'
+                },
+                ...(partner.history || [])
+              ]
+            };
+            const updatedFemaleCage: FarmCage = {
+              ...finalCage,
+              status: 'trong',
+              statusLabel: 'Trống do chuyển ghép',
+              gender: 'cai',
+              ratCount: 0,
+              matingDate: todayStr,
+              partnerCageId: partner.id,
+              partnerCageCode: partner.code,
+              notes: `Dúi cái chuyển sang ghép đôi tại Ô Đực ${partner.code} từ ngày ${formatDateVN(todayStr)}. Lịch tách ghép: +20 ngày.`
+            };
+            next = next.map(c => c.id === syncedPartner.id ? syncedPartner : (c.id === finalCage.id ? updatedFemaleCage : c));
+          }
+        }
+      }
+      return next;
+    });
+
     // Cập nhật số lượng ô của khu tương ứng
     setAreas(prev => prev.map(a => {
       if (a.id === finalCage.areaId) {
@@ -592,9 +838,20 @@ export const FarmIntegratedApp: React.FC<FarmIntegratedAppProps> = ({
     kind: 'cai' | 'duc' | 'chung' = 'cai', 
     tierCount: number = 2
   ) => {
+    // Đảm bảo mã dãy luôn chuẩn (DĐ1, DĐ2, DC1, DC2...) nếu người dùng chỉ nhập tên
+    let cleanCode = (rowCode || '').trim().toUpperCase();
+    if (!cleanCode || cleanCode.includes(' ') || cleanCode.length > 8) {
+      const isDuc = kind === 'duc' || rowName.toLowerCase().includes('đực');
+      const isCai = kind === 'cai' || rowName.toLowerCase().includes('cái');
+      const rowNum = extractRowNumber(cleanCode, rowName);
+      if (isDuc) cleanCode = `DĐ${rowNum}`;
+      else if (isCai) cleanCode = `DC${rowNum}`;
+      else cleanCode = `D${rowNum}`;
+    }
+
     const parentArea = areas.find(a => a.id === areaId);
     const reg = registerOrRecoverPhysicalLocation('row', {
-      code: rowCode,
+      code: cleanCode,
       name: rowName,
       areaId,
       areaCode: parentArea?.code,
@@ -605,7 +862,7 @@ export const FarmIntegratedApp: React.FC<FarmIntegratedAppProps> = ({
       id: `row-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       physicalId: reg.physicalId,
       areaId,
-      code: rowCode,
+      code: cleanCode,
       name: rowName,
       kind,
       genderBadge: kind === 'cai' ? '♀ Dãy Cái' : kind === 'duc' ? '♂ Dãy Đực' : undefined,
@@ -626,9 +883,9 @@ export const FarmIntegratedApp: React.FC<FarmIntegratedAppProps> = ({
     }));
 
     if (reg.isRecovered) {
-      showToast(`✓ Đã phục hồi mã QR vật lý cũ cho dãy "${rowName}" (${rowCode})!`);
+      showToast(`✓ Đã phục hồi mã QR vật lý cũ cho dãy "${rowName}" (${cleanCode})!`);
     } else {
-      showToast(`Đã thêm thành công dãy "${rowName}" (${rowCode})!`);
+      showToast(`Đã thêm thành công dãy "${rowName}" (${cleanCode})!`);
     }
   };
 
@@ -1327,6 +1584,7 @@ export const FarmIntegratedApp: React.FC<FarmIntegratedAppProps> = ({
       {/* MODAL 1: HỒ SƠ Ô CHUỒNG (Bấm Ô đã tồn tại mở Hồ Sơ Ô) */}
       {selectedCageForProfile && (
         <FarmCageProfileModal
+          key={selectedCageForProfile.id || selectedCageForProfile.code}
           cage={selectedCageForProfile}
           allCages={cages}
           allAreas={areas}
@@ -1337,6 +1595,14 @@ export const FarmIntegratedApp: React.FC<FarmIntegratedAppProps> = ({
             setSelectedCageForProfile(null);
           }}
           onOpenQR={(cage) => setSelectedQRTarget({ cage })}
+          onSelectCage={(c) => {
+            const targetCode = c.code.trim().toUpperCase();
+            const fresh = (c.id ? cages.find(item => item.id === c.id) : null)
+              || cages.find(item => item.code.trim().toUpperCase() === targetCode && (item.status === 'ghep_doi' || item.status !== 'trong'))
+              || cages.find(item => item.code.trim().toUpperCase() === targetCode)
+              || c;
+            setSelectedCageForProfile(fresh);
+          }}
           userRole={userRole}
           onOpenAdminLogin={onOpenAdminLogin}
         />
@@ -1569,6 +1835,23 @@ export const FarmIntegratedApp: React.FC<FarmIntegratedAppProps> = ({
           </button>
         </div>
       )}
+
+      {/* Floating Chat Tư vấn Trực tuyến Phân Hệ Trang Trại */}
+      <ModuleChatWidget
+        module="farm"
+        title="Tư Vấn Kỹ Thuật Trại Dúi KaKa"
+        subtitle="Chuyên gia Phan Dũng • Trực tuyến 24/7"
+        avatarIcon={<Sparkles className="w-5 h-5 text-amber-300" />}
+        headerGradientClass="bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900"
+        accentColorClass="bg-emerald-600 hover:bg-emerald-700"
+        hotline="0969310601"
+        hotlineFormatted="0969.310.601"
+        initialMessage="Chào mừng quý khách đến với Trại Dúi KaKa (Phan Dũng)! Chúng tôi sẵn sàng tư vấn kỹ thuật nuôi dúi má đào, mốc lớn, cách làm chuồng trại tiêu chuẩn, phòng ngừa bệnh và hợp đồng bao tiêu đầu ra trọn đời. Bạn cần hỗ trợ thông tin gì ạ?"
+        quickPrompts={FARM_QUICK_PROMPTS}
+        smartResponseHandler={handleFarmChatResponse}
+        onSpecialAction={() => setCurrentTab('products')}
+        specialActionLabel="Xem bảng giá con giống & đặt hàng"
+      />
     </div>
   );
 };

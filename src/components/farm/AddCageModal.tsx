@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { FarmArea, FarmRow, FarmCage, CageStatus, DuiSpecies } from './farmTypes';
-import { findGapAndNextCageCodes, normalizeFarmCage } from './farmData';
+import { findGapAndNextCageCodes, normalizeFarmCage, computeCageCodePrefix } from './farmData';
 import { 
   FarmStatusBusinessForm, 
   BusinessFormData, 
@@ -60,7 +60,7 @@ export const AddCageModal: React.FC<AddCageModalProps> = ({
   // Form data nghiệp vụ chi tiết
   const [formData, setFormData] = useState<BusinessFormData>({
     status: 'trong',
-    ratCount: selectedArea?.kind === 'sinh_san' ? 1 : 4,
+    ratCount: 0,
     species: 'moc_dai',
     gender: selectedRow?.kind === 'duc' ? 'duc' : selectedArea?.kind === 'sinh_san' ? 'cai' : 'dan',
     
@@ -154,7 +154,7 @@ export const AddCageModal: React.FC<AddCageModalProps> = ({
       ...prev,
       status: 'trong',
       gender: selectedRow?.kind === 'duc' ? 'duc' : selectedArea?.kind === 'sinh_san' ? 'cai' : 'dan',
-      ratCount: selectedArea?.kind === 'sinh_san' ? 1 : 4
+      ratCount: 0
     }));
   }, [selectedAreaId]);
 
@@ -167,70 +167,60 @@ export const AddCageModal: React.FC<AddCageModalProps> = ({
     }
   }, [selectedRowId]);
 
-  // Lấy các ô hiện tại trong Dãy đã chọn để phân tích mã khuyết & mã kế tiếp
-  const currentRowCages = useMemo(() => {
-    return existingCages.filter(c => selectedRow?.id ? c.rowId === selectedRow.id : c.areaId === selectedArea?.id);
-  }, [existingCages, selectedArea?.id, selectedRow?.id]);
+  // Lấy các ô trong phân khu và dãy đã chọn
+  const currentAreaCages = useMemo(() => {
+    return existingCages.filter(c => c.areaId === selectedArea?.id || c.areaKind === selectedArea?.kind);
+  }, [existingCages, selectedArea?.id, selectedArea?.kind]);
 
-  // Tiền tố mặc định theo Khu và Dãy
+  const currentRowCages = useMemo(() => {
+    if (!selectedRow) return [];
+    return currentAreaCages.filter(c => 
+      c.rowId === selectedRow.id || 
+      (c.rowId === 'row-area-ss1-c1' && selectedRow.id === 'row-ss1-c1') ||
+      (c.rowId === 'row-area-ss1-c2' && selectedRow.id === 'row-ss1-c2') ||
+      (c.rowId === 'row-area-ss1-d1' && selectedRow.id === 'row-ss1-d1') ||
+      (c.rowCode === selectedRow.name || c.rowCode === selectedRow.code) ||
+      (c.code.toUpperCase().startsWith(selectedRow.code.toUpperCase()))
+    );
+  }, [currentAreaCages, selectedRow]);
+
+  // Tiền tố mặc định theo Khu, Dãy và Tầng/Hàng (Chuẩn: DĐ1-H1-001, DC1-H1-001...)
   const defaultPrefix = useMemo(() => {
-    const row = areaRows.find(r => r.id === selectedRowId);
-    if (selectedArea?.kind === 'sinh_san') {
-      if (row?.code.includes('C1') || row?.name.includes('Cái 1')) return 'C1-';
-      if (row?.code.includes('C2') || row?.name.includes('Cái 2')) return 'C2-';
-      if (row?.code.includes('D1') || row?.name.includes('Đực 1')) return 'D1-';
-      if (row?.code.includes('Cái') || row?.name.includes('Cái')) return 'C1-';
-      if (row?.code.includes('Đực') || row?.name.includes('Đực')) return 'D1-';
-      return 'C1-';
-    }
-    if (selectedArea?.kind === 'baby') {
-      if (row?.name.includes('3–4') || row?.name.includes('3-4') || row?.code.includes('3-4')) return 'BB1-';
-      if (row?.name.includes('5–7') || row?.name.includes('5-7') || row?.code.includes('5-7')) return 'BB2-';
-      if (row?.name.includes('8') || row?.code.includes('8-11')) return 'BB3-';
-      return 'BB1-';
-    }
-    if (selectedArea?.kind === 'hau_bi') {
-      if (row?.name.includes('1') || row?.code.includes('1')) return 'HB1-';
-      if (row?.name.includes('2') || row?.code.includes('2')) return 'HB2-';
-      return 'HB1-';
-    }
-    if (selectedArea?.kind === 'thuong_pham') {
-      if (row?.name.includes('1') || row?.code.includes('1')) return 'TP1-';
-      if (row?.name.includes('2') || row?.code.includes('2')) return 'TP2-';
-      return 'TP1-';
-    }
-    if (selectedArea?.kind === 'dieu_tri') {
-      if (row?.name.includes('1') || row?.code.includes('1')) return 'DT1-';
-      if (row?.name.includes('2') || row?.code.includes('2')) return 'DT2-';
-      return 'DT1-';
-    }
-    return selectedArea?.code ? `${selectedArea.code.replace('KHU-', '')}-` : 'O-';
-  }, [selectedArea, selectedRowId, areaRows]);
+    const row = areaRows.find(r => r.id === selectedRowId) || selectedRow;
+    return computeCageCodePrefix(row, selectedTier, selectedArea);
+  }, [selectedArea, selectedRowId, selectedRow, selectedTier, areaRows]);
 
   // Tìm mã khuyết và mã tiếp theo
   const { gapCodes, nextCodes } = useMemo(() => {
-    return findGapAndNextCageCodes(currentRowCages, defaultPrefix, 4);
-  }, [currentRowCages, defaultPrefix]);
+    return findGapAndNextCageCodes(currentRowCages, defaultPrefix, 4, currentAreaCages);
+  }, [currentRowCages, defaultPrefix, currentAreaCages]);
 
-  // Kiểm tra trùng lặp mã ô thời gian thực THEO PHẠM VI DÃY
+  // Kiểm tra trùng lặp mã ô thời gian thực (chỉ cảnh báo nếu ô đã có dúi đang nuôi)
   const isDuplicateInRow = useMemo(() => {
     if (!cageCode.trim() || !selectedRow) return false;
     const formatted = cageCode.trim().toUpperCase();
     return existingCages.some(
-      c => c.rowId === selectedRow.id && c.code.trim().toUpperCase() === formatted
+      c => (c.rowId === selectedRow.id || 
+            (c.rowId === 'row-area-ss1-c1' && selectedRow.id === 'row-ss1-c1') ||
+            (c.rowId === 'row-area-ss1-c2' && selectedRow.id === 'row-ss1-c2') ||
+            (c.rowId === 'row-area-ss1-d1' && selectedRow.id === 'row-ss1-d1') ||
+            (selectedArea?.id && c.areaId === selectedArea.id && (c.rowCode === selectedRow.name || c.rowCode === selectedRow.code)) ||
+            (selectedArea?.id && c.areaId === selectedArea.id && c.code.toUpperCase().startsWith(selectedRow.code.toUpperCase()))) &&
+           c.code.trim().toUpperCase() === formatted &&
+           (c.status !== 'trong' || (c.ratCount || 0) > 0)
     );
-  }, [cageCode, selectedRow, existingCages]);
+  }, [cageCode, selectedRow, selectedArea?.id, existingCages]);
 
-  // Tự động gán mã gợi ý đầu tiên nếu chưa nhập và không có initialCageCode
+  // Tự động gán mã gợi ý đầu tiên nếu chưa nhập hoặc khi đổi Dãy / Tầng
   useEffect(() => {
-    if (!cageCode && !initialCageCode) {
+    if (!initialCageCode) {
       if (gapCodes.length > 0) {
         setCageCode(gapCodes[0]);
       } else if (nextCodes.length > 0) {
         setCageCode(nextCodes[0]);
       }
     }
-  }, [gapCodes, nextCodes, initialCageCode]);
+  }, [defaultPrefix, gapCodes, nextCodes, initialCageCode]);
 
   // Tự động tính số thứ tự vị trí tiếp theo V1, V2, V3, V4...
   useEffect(() => {
@@ -276,12 +266,15 @@ export const AddCageModal: React.FC<AddCageModalProps> = ({
     const formattedCode = cageCode.trim().toUpperCase();
     const row = areaRows.find(r => r.id === selectedRowId) || areaRows[0] || { id: 'row-default', code: 'Dãy 1', name: 'Dãy 1' };
 
-    const existsInRow = existingCages.some(
-      c => c.rowId === row.id && c.code.trim().toUpperCase() === formattedCode
+    // Kiểm tra xem ô này đã tồn tại và đang có cá thể dúi nuôi hay không
+    const existingActiveCage = existingCages.find(
+      c => (c.areaId === selectedArea.id || c.areaKind === selectedArea.kind) && 
+           c.code.trim().toUpperCase() === formattedCode && 
+           (c.status !== 'trong' || (c.ratCount || 0) > 0)
     );
 
-    if (existsInRow) {
-      setErrorMessage(`Mã ô "${formattedCode}" đã tồn tại trong ${row.name} (${selectedArea.name})! Vui lòng chọn mã khác.`);
+    if (existingActiveCage) {
+      setErrorMessage(`Mã ô "${formattedCode}" đã có cá thể dúi đang nuôi (${existingActiveCage.statusLabel || existingActiveCage.status})! Vui lòng chọn mã khác.`);
       return;
     }
 
@@ -336,9 +329,9 @@ export const AddCageModal: React.FC<AddCageModalProps> = ({
       partnerCageCode: (formData.status === 'ghep_doi' || formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_cai') ? formData.partnerCageCode : undefined,
       
       // Tách đực / tách cái
-      matingSeparationDate: (formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_cai') ? formData.matingSeparationDate : undefined,
-      followupDurationDays: (formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_cai') ? parseNum(formData.followupDurationDays, 10) : undefined,
-      expectedEvaluationDate: (formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_cai') ? formData.expectedEvaluationDate : undefined,
+      matingSeparationDate: (formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_duc_khong_ro' || formData.status === 'moi_tach_cai') ? formData.matingSeparationDate : undefined,
+      followupDurationDays: (formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_duc_khong_ro' || formData.status === 'moi_tach_cai') ? parseNum(formData.followupDurationDays, 10) : undefined,
+      expectedEvaluationDate: (formData.status === 'moi_tach_duc' || formData.status === 'moi_tach_duc_khong_ro' || formData.status === 'moi_tach_cai') ? formData.expectedEvaluationDate : undefined,
       
       // Tách con
       weaningDate: formData.status === 'moi_tach_con' ? formData.weaningDate : undefined,
@@ -598,7 +591,7 @@ export const AddCageModal: React.FC<AddCageModalProps> = ({
             </div>
             <input
               type="text"
-              placeholder="VD: C1-01, C2-01, D1-01..."
+              placeholder="VD: DĐ1-H1-001, DC1-H1-001..."
               value={cageCode}
               onChange={e => {
                 setCageCode(e.target.value);
@@ -641,7 +634,19 @@ export const AddCageModal: React.FC<AddCageModalProps> = ({
                 const newStatus = e.target.value as CageStatus;
                 handleFormDataChange({ 
                   status: newStatus,
-                  ratCount: newStatus === 'trong' ? 0 : (newStatus === 'ghep_doi' ? 2 : 1)
+                  ratCount: newStatus === 'trong' ? 0 : (newStatus === 'ghep_doi' ? 2 : (selectedArea?.kind === 'sinh_san' ? 1 : (selectedArea?.kind === 'baby' ? 4 : 1))),
+                  ...(newStatus === 'ghep_doi' ? { partnerCageCode: '' } : {}),
+                  ...(newStatus === 'moi_tach_duc_khong_ro' ? {
+                    gender: 'cai',
+                    partnerCageCode: '',
+                    followupDurationDays: 60,
+                    matingSeparationDate: todayStr,
+                    expectedEvaluationDate: (() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() + 60);
+                      return d.toISOString().split('T')[0];
+                    })()
+                  } : {})
                 });
               }}
               className="w-full px-3 py-2.5 rounded-xl border border-emerald-400 bg-white font-bold text-emerald-950 text-sm shadow-2xs"
@@ -661,6 +666,9 @@ export const AddCageModal: React.FC<AddCageModalProps> = ({
             onChange={handleFormDataChange}
             existingCages={existingCages}
             allAreas={areas}
+            currentAreaId={selectedArea.id}
+            currentCageCode={cageCode}
+            currentCageGender={formData.gender || (selectedRow?.kind === 'duc' ? 'duc' : 'cai')}
           />
 
           {/* Ghi chú chuồng */}

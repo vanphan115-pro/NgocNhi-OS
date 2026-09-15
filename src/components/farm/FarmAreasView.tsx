@@ -13,6 +13,7 @@ import {
   Lock
 } from 'lucide-react';
 import { EditCageModal } from './EditCageModal';
+import { computeNextRowSuggestion } from './farmData';
 
 interface FarmAreasViewProps {
   areas: FarmArea[];
@@ -71,6 +72,7 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
   // State cho Modal Thêm Dãy
   const [showAddRowModal, setShowAddRowModal] = useState(false);
   const [newRowName, setNewRowName] = useState('');
+  const [newRowCode, setNewRowCode] = useState('');
   const [newRowKind, setNewRowKind] = useState<'cai' | 'duc' | 'chung'>('cai');
   const [newRowTierCount, setNewRowTierCount] = useState<number>(2);
 
@@ -125,15 +127,43 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
     setAreaToDelete(null);
   };
 
+  // Mở modal thêm Dãy với gợi ý tự động đồng bộ (Dãy Cái -> DC{n}, Dãy Đực -> DĐ{n})
+  const handleOpenAddRowModal = (defaultKind: 'cai' | 'duc' | 'chung' = 'cai') => {
+    if (!currentArea) return;
+    const existingInArea = rows.filter(r => r.areaId === currentArea.id);
+    const suggestion = computeNextRowSuggestion(existingInArea, defaultKind);
+    setNewRowKind(defaultKind);
+    setNewRowName(suggestion.name);
+    setNewRowCode(suggestion.code);
+    setNewRowTierCount(suggestion.tierCount);
+    setShowAddRowModal(true);
+  };
+
+  // Đổi phân loại dãy: tự động đồng bộ tên và mã dãy tiếp theo
+  const handleSelectRowKind = (kind: 'cai' | 'duc' | 'chung') => {
+    setNewRowKind(kind);
+    if (!currentArea) return;
+    const existingInArea = rows.filter(r => r.areaId === currentArea.id);
+    const suggestion = computeNextRowSuggestion(existingInArea, kind);
+    setNewRowName(suggestion.name);
+    setNewRowCode(suggestion.code);
+    setNewRowTierCount(suggestion.tierCount);
+  };
+
   // Handler thêm Dãy
   const handleSaveAddRow = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentArea || !newRowName.trim()) return;
-    const rowCode = newRowName.trim().toUpperCase();
+    let finalCode = newRowCode.trim().toUpperCase();
+    if (!finalCode) {
+      const existingInArea = rows.filter(r => r.areaId === currentArea.id);
+      finalCode = computeNextRowSuggestion(existingInArea, newRowKind).code;
+    }
     if (onAddRow) {
-      onAddRow(currentArea.id, newRowName.trim(), rowCode, newRowKind, newRowTierCount);
+      onAddRow(currentArea.id, newRowName.trim(), finalCode, newRowKind, newRowTierCount);
     }
     setNewRowName('');
+    setNewRowCode('');
     setShowAddRowModal(false);
   };
 
@@ -191,6 +221,7 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
           statusText: 'text-[#9333ea]'
         };
       case 'moi_tach_duc':
+      case 'moi_tach_duc_khong_ro':
         return {
           card: 'bg-[#fefce8] border-[#fde047] text-slate-800 hover:border-yellow-400',
           statusText: 'text-[#ca8a04]'
@@ -258,6 +289,12 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
         };
       case 'trong':
       default:
+        if (cage.partnerCageCode || cage.statusLabel?.includes('chuyển ghép')) {
+          return {
+            card: 'bg-[#fffbfa] border-dashed border-pink-300/90 text-slate-700 hover:border-pink-400',
+            statusText: 'text-pink-600'
+          };
+        }
         return {
           card: 'bg-white border-dashed border-slate-300 text-slate-400 hover:border-slate-400',
           statusText: 'text-slate-400'
@@ -268,16 +305,19 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
   // Helper hiển thị phụ đề bên dưới trạng thái (tối ưu ngắn gọn, sắc nét cho kích thước 60%)
   const renderCageSubtitle = (cage: FarmCage) => {
     if (cage.status === 'trong') {
-      return <span className="text-slate-400 text-[9.5px]">Trống</span>;
+      if (cage.partnerCageCode) {
+        return <span className="text-pink-600 font-semibold text-[9.5px] truncate">♀ Ghép tại {cage.partnerCageCode}</span>;
+      }
+      return <span className="text-slate-400 text-[9.5px]">Trống (0 con)</span>;
     }
     if (cage.status === 'ghep_doi') {
-      if (cage.gender === 'duc') {
-        return <span className="text-slate-600 text-[9.5px] font-medium truncate">♀ Ghép {cage.partnerCageCode || '---'}</span>;
-      }
-      return <span className="text-slate-600 text-[9.5px] font-medium truncate">♂ Ghép {cage.partnerCageCode || '---'}</span>;
+      return <span className="text-purple-700 text-[9.5px] font-bold truncate">⚤ Cặp 2c ({cage.partnerCageCode || '---'})</span>;
     }
     if (cage.status === 'moi_tach_duc') {
       return <span className="text-amber-800 text-[9.5px] font-semibold truncate">⏳ Chờ KQ ({cage.partnerCageCode || '---'})</span>;
+    }
+    if (cage.status === 'moi_tach_duc_khong_ro') {
+      return <span className="text-amber-800 text-[9.5px] font-semibold truncate">⏳ Chờ KQ (Không rõ đực)</span>;
     }
     if (cage.status === 'moi_tach_cai') {
       return <span className="text-blue-800 text-[9.5px] font-semibold truncate">⏳ Dưỡng 10n ({cage.partnerCageCode || '---'})</span>;
@@ -399,6 +439,7 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
                   const matingOrWaiting = areaCages.filter(c => 
                     c.status === 'ghep_doi' || 
                     c.status === 'moi_tach_duc' || 
+                    c.status === 'moi_tach_duc_khong_ro' || 
                     c.status === 'moi_tach_con' || 
                     c.status === 'moi_tach_cai'
                   ).length;
@@ -784,7 +825,7 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
                 <>
                   {/* Nút + Thêm Dãy (Xanh lá đậm #15803d) */}
                   <button
-                    onClick={() => setShowAddRowModal(true)}
+                    onClick={() => handleOpenAddRowModal('cai')}
                     className="px-4 py-2 rounded-xl bg-[#15803d] hover:bg-[#166534] text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
                   >
                     <span>+</span>
@@ -836,8 +877,15 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
           </div>
         ) : (
           areaRows.map((row) => {
-            // Lấy tất cả các ô thuộc Dãy này
-            const rowCages = cages.filter(c => c.rowId === row.id);
+            // Lấy tất cả các ô thuộc Dãy này (kèm tương thích ngược rowId cũ nếu có)
+            const rowCages = cages.filter(c => 
+              c.rowId === row.id ||
+              (c.rowId === 'row-area-ss1-c1' && row.id === 'row-ss1-c1') ||
+              (c.rowId === 'row-area-ss1-c2' && row.id === 'row-ss1-c2') ||
+              (c.rowId === 'row-area-ss1-d1' && row.id === 'row-ss1-d1') ||
+              (c.areaId === currentArea.id && (c.rowCode === row.name || c.rowCode === row.code)) ||
+              (c.areaId === currentArea.id && c.code.toUpperCase().startsWith(row.code.toUpperCase()))
+            );
             const totalCagesInRow = rowCages.length;
 
             // Xác định số tầng/hàng của Dãy (mặc định 2 tầng nếu là Cái, 1 tầng nếu là Đực hoặc theo row.tierCount)
@@ -1030,9 +1078,14 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
 
                                   {/* Icon Giới Tính */}
                                   {cage.status === 'ghep_doi' ? (
-                                    <span className="text-[9.5px] font-bold flex items-center shrink-0">
-                                      <span className="text-pink-500">♀</span>
-                                      <span className="text-blue-500">♂</span>
+                                    <span className="text-[9px] font-black flex items-center shrink-0 bg-purple-100/90 text-purple-900 px-1 py-0.5 rounded border border-purple-200">
+                                      <span className="text-pink-600">♀</span>
+                                      <span className="text-blue-600">♂</span>
+                                      <span className="ml-0.5 text-[8.5px] font-mono">2</span>
+                                    </span>
+                                  ) : (cage.status === 'trong' && cage.partnerCageCode) ? (
+                                    <span className="text-[9px] font-bold text-pink-600 bg-pink-50 px-1 py-0.5 rounded border border-pink-200 shrink-0" title={`Đang ghép tại ${cage.partnerCageCode}`}>
+                                      ♀→
                                     </span>
                                   ) : cage.gender === 'duc' ? (
                                     <span className="text-blue-500 font-bold text-[9.5px] shrink-0">♂</span>
@@ -1048,7 +1101,9 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
                                 {/* Dòng 2 & 3: Trạng thái & Ghi chú thông số */}
                                 <div className="space-y-0.5 min-w-0">
                                   <p className={`text-[10px] font-bold truncate leading-tight ${style.statusText}`}>
-                                    {cage.statusLabel}
+                                    {cage.status === 'trong' && (cage.partnerCageCode || cage.statusLabel?.includes('chuyển ghép'))
+                                      ? 'Trống do chuyển ghép'
+                                      : cage.statusLabel}
                                   </p>
                                   <p className="text-[8.5px] truncate leading-tight">
                                     {renderCageSubtitle(cage)}
@@ -1132,26 +1187,11 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
             </div>
             <form onSubmit={handleSaveAddRow} className="space-y-3.5 text-xs">
               <div>
-                <label className="font-bold text-slate-700 block mb-1">Tên Dãy (VD: Dãy Cái 3, Dãy Đực 2)</label>
-                <input
-                  type="text"
-                  placeholder="Nhập tên dãy..."
-                  value={newRowName}
-                  onChange={(e) => setNewRowName(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 bg-white font-medium"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">Phân loại Dãy</label>
+                <label className="font-bold text-slate-700 block mb-1">1. Phân loại Dãy</label>
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      setNewRowKind('cai');
-                      setNewRowTierCount(2);
-                    }}
+                    onClick={() => handleSelectRowKind('cai')}
                     className={`p-2.5 rounded-xl border text-center font-bold transition-all ${
                       newRowKind === 'cai' ? 'bg-[#fdf2f8] border-[#f472b6] text-[#db2777]' : 'bg-slate-50 border-slate-200 text-slate-600'
                     }`}
@@ -1160,10 +1200,7 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setNewRowKind('duc');
-                      setNewRowTierCount(1);
-                    }}
+                    onClick={() => handleSelectRowKind('duc')}
                     className={`p-2.5 rounded-xl border text-center font-bold transition-all ${
                       newRowKind === 'duc' ? 'bg-[#eff6ff] border-[#60a5fa] text-[#2563eb]' : 'bg-slate-50 border-slate-200 text-slate-600'
                     }`}
@@ -1172,7 +1209,7 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setNewRowKind('chung')}
+                    onClick={() => handleSelectRowKind('chung')}
                     className={`p-2.5 rounded-xl border text-center font-bold transition-all ${
                       newRowKind === 'chung' ? 'bg-emerald-50 border-emerald-400 text-emerald-800' : 'bg-slate-50 border-slate-200 text-slate-600'
                     }`}
@@ -1183,7 +1220,31 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
               </div>
 
               <div>
-                <label className="font-bold text-slate-700 block mb-1">Số tầng / Hàng chuồng</label>
+                <label className="font-bold text-slate-700 block mb-1">2. Tên Dãy</label>
+                <input
+                  type="text"
+                  placeholder="VD: Dãy Cái 3, Dãy Đực 2..."
+                  value={newRowName}
+                  onChange={(e) => setNewRowName(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 bg-white font-medium"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">3. Mã Dãy (Quy định mã ô chuồng con)</label>
+                <input
+                  type="text"
+                  placeholder="VD: DC3, DĐ2..."
+                  value={newRowCode}
+                  onChange={(e) => setNewRowCode(e.target.value.toUpperCase())}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 bg-white font-mono font-bold uppercase text-emerald-950"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">4. Số tầng / Hàng chuồng</label>
                 <div className="flex gap-3">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -1206,6 +1267,19 @@ export const FarmAreasView: React.FC<FarmAreasViewProps> = ({
                     <span>1 Tầng (Đơn hàng)</span>
                   </label>
                 </div>
+              </div>
+
+              {/* Xem trước mã ô chuồng tự sinh */}
+              <div className="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-1">
+                <span className="text-[10px] font-bold text-emerald-800 uppercase block">
+                  ✨ Tự động đồng bộ mã ô chuồng con:
+                </span>
+                <p className="font-mono text-xs font-bold text-emerald-900">
+                  {newRowCode ? `${newRowCode}-H1-001, ${newRowCode}-H1-002, ${newRowCode}-H1-003...` : 'DĐ1-H1-001...'}
+                </p>
+                <p className="text-[11px] text-emerald-700">
+                  Khi tạo ô mới trong dãy này, mã ô sẽ tự sinh theo đúng chuẩn ({newRowKind === 'duc' ? 'DĐ... cho đực' : 'DC... cho cái'}).
+                </p>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">

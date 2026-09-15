@@ -412,3 +412,18 @@
   margin-top: auto;
 }
 
+/* Định dạng in chuẩn cho máy in decal & máy in văn phòng */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  
+  /* Ẩn các thanh điều hướng, modal backdrop khi in trực tiếp */
+  header, nav, .dashboard-sidebar, .screen-only, button {
+    display: none !important;
+  }
+}
+

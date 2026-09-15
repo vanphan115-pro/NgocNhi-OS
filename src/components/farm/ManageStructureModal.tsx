@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FarmArea, FarmRow, FarmCage, AreaKind } from './farmTypes';
-import { createStandardBreedingAreaStructure } from './farmData';
+import { createStandardBreedingAreaStructure, computeNextRowSuggestion } from './farmData';
 import { X, Plus, Trash2, Edit3, Building2, Layers, Grid3X3, Check, AlertTriangle, Sparkles } from 'lucide-react';
 
 interface ManageStructureModalProps {
@@ -49,6 +49,17 @@ export const ManageStructureModal: React.FC<ManageStructureModalProps> = ({
 
   const currentArea = areas.find(a => a.id === selectedAreaId) || areas[0];
   const areaRows = rows.filter(r => r.areaId === currentArea?.id);
+
+  // Tự động gợi ý tên & mã dãy khi chuyển tab hoặc đổi loại dãy
+  const applyRowKindSuggestion = (kind: 'cai' | 'duc' | 'chung', areaId = selectedAreaId) => {
+    const targetArea = areas.find(a => a.id === areaId) || areas[0];
+    const existing = targetArea ? rows.filter(r => r.areaId === targetArea.id) : [];
+    const suggestion = computeNextRowSuggestion(existing, kind);
+    setNewRowKind(kind);
+    setNewRowTierCount(suggestion.tierCount);
+    setNewRowName(suggestion.name);
+    setNewRowCode(suggestion.code);
+  };
 
   const handleCreateArea = (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,9 +118,14 @@ export const ManageStructureModal: React.FC<ManageStructureModalProps> = ({
 
   const handleCreateRow = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newRowName.trim() || !newRowCode.trim() || !currentArea) return;
+    if (!newRowName.trim() || !currentArea) return;
 
-    onAddRow(currentArea.id, newRowName.trim(), newRowCode.trim().toUpperCase(), newRowKind, newRowTierCount);
+    let finalCode = newRowCode.trim().toUpperCase();
+    if (!finalCode) {
+      finalCode = computeNextRowSuggestion(areaRows, newRowKind).code;
+    }
+
+    onAddRow(currentArea.id, newRowName.trim(), finalCode, newRowKind, newRowTierCount);
     setNewRowName('');
     setNewRowCode('');
   };
@@ -288,7 +304,11 @@ export const ManageStructureModal: React.FC<ManageStructureModalProps> = ({
                 <span className="font-bold text-slate-700 text-xs">Chọn Khu Quản Lý:</span>
                 <select
                   value={selectedAreaId}
-                  onChange={e => setSelectedAreaId(e.target.value)}
+                  onChange={e => {
+                    const newId = e.target.value;
+                    setSelectedAreaId(newId);
+                    applyRowKindSuggestion(newRowKind, newId);
+                  }}
                   className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white font-bold text-xs"
                 >
                   {areas.map(a => (
@@ -314,18 +334,17 @@ export const ManageStructureModal: React.FC<ManageStructureModalProps> = ({
                   />
                   <input
                     type="text"
-                    placeholder="Mã dãy (VD: DC3)"
+                    placeholder="Mã dãy (VD: DC3, DĐ2)"
                     value={newRowCode}
-                    onChange={e => setNewRowCode(e.target.value)}
+                    onChange={e => setNewRowCode(e.target.value.toUpperCase())}
                     required
-                    className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white uppercase font-mono"
+                    className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white uppercase font-mono font-bold text-sky-950"
                   />
                   <select
                     value={newRowKind}
                     onChange={e => {
                       const k = e.target.value as 'cai' | 'duc' | 'chung';
-                      setNewRowKind(k);
-                      setNewRowTierCount(k === 'cai' ? 2 : 1);
+                      applyRowKindSuggestion(k);
                     }}
                     className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white font-medium"
                   >
@@ -335,10 +354,15 @@ export const ManageStructureModal: React.FC<ManageStructureModalProps> = ({
                   </select>
                   <button
                     type="submit"
-                    className="px-4 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold shadow-xs"
+                    className="px-4 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold shadow-xs cursor-pointer"
                   >
                     + Thêm Dãy
                   </button>
+                </div>
+                {/* Xem trước mã ô chuồng tự sinh */}
+                <div className="flex items-center justify-between text-[11px] text-sky-800 bg-white/80 px-3 py-1.5 rounded-xl border border-sky-100">
+                  <span>Mã ô tự sinh chuẩn: <strong className="font-mono text-sky-950">{newRowCode ? `${newRowCode}-H1-001, ${newRowCode}-H1-002...` : 'DĐ1-H1-001...'}</strong></span>
+                  <span className="text-[10px] text-sky-600">({newRowKind === 'duc' ? '♂ Dãy Đực: DĐ' : '♀ Dãy Cái: DC'})</span>
                 </div>
               </form>
 

@@ -12,6 +12,7 @@ import {
 import { MANAGERS } from '../data/initialData';
 import { computeOperationsData, OperationalTransaction, OperationalNotification, OperationalTask } from '../utils/operationsData';
 import { ExternalFinanceView } from './ExternalFinanceView';
+import { UniversalQRModal } from './farm/UniversalQRModal';
 import { syncOnlinePayload } from '../services/onlineSyncService';
 import { 
   LayoutDashboard, 
@@ -60,7 +61,8 @@ import {
   Menu,
   Crown,
   Database,
-  Layers
+  Layers,
+  QrCode
 } from 'lucide-react';
 
 interface OperationsCenterProps {
@@ -245,6 +247,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
   };
 
   // Modals state
+  const [showSystemQRModal, setShowSystemQRModal] = useState<boolean>(false);
   const [showAllNotifsModal, setShowAllNotifsModal] = useState<boolean>(false);
   const [showAllTasksModal, setShowAllTasksModal] = useState<boolean>(false);
   const [showAllTxModal, setShowAllTxModal] = useState<boolean>(false);
@@ -509,6 +512,21 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
                 )}
               </button>
 
+              {/* QR Hệ Thống Toàn Diện */}
+              <button
+                onClick={() => setShowSystemQRModal(true)}
+                className="w-full flex items-center justify-between px-3.5 py-2 rounded-xl text-xs font-semibold text-amber-300 bg-amber-950/40 border border-amber-800/50 hover:bg-amber-900/50 transition-colors cursor-pointer"
+                title="Xem & in mã QR Tổng của toàn bộ Hệ thống Dịch vụ Ngọc Nhi"
+              >
+                <div className="flex items-center gap-3">
+                  <QrCode className="w-4 h-4 text-amber-400 shrink-0" />
+                  {!sidebarCollapsed && <span>01 QR Tổng Hệ Thống</span>}
+                </div>
+                {!sidebarCollapsed && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold">In tem</span>
+                )}
+              </button>
+
               {/* Thông Báo */}
               <button
                 onClick={() => setShowAllNotifsModal(true)}
@@ -602,6 +620,17 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
               </span>
               <span className="hidden sm:inline font-medium">Tự Động Đồng Bộ Live</span>
             </div>
+
+            {/* Quick QR Hệ Thống Button */}
+            <button
+              onClick={() => setShowSystemQRModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold transition-all shadow-2xs cursor-pointer hover:scale-105"
+              title="Xem & in mã QR Tổng của toàn bộ Hệ thống Dịch vụ Ngọc Nhi"
+              id="ops-system-qr-button"
+            >
+              <QrCode className="w-3.5 h-3.5 text-amber-700" />
+              <span>QR Hệ Thống</span>
+            </button>
 
             {/* Quick Add External Finance Button */}
             <button
@@ -1611,6 +1640,13 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* Universal System QR Modal */}
+      {showSystemQRModal && (
+        <UniversalQRModal
+          initialType="system"
+          onClose={() => setShowSystemQRModal(false)}
+        />
       )}
     </div>
   );

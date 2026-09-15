@@ -253,4 +253,32 @@ export interface ExternalFinanceRecord {
   createdAt: string;
 }
 
+// ----------------------------------------------------
+// AI ASSISTANT & ADMIN DECISION APPROVALS
+// ----------------------------------------------------
+export type AIDecisionType = 
+  | 'chot_don_giong' 
+  | 'chot_don_tiec' 
+  | 'chot_ban_an' 
+  | 'giam_gia_dac_biet' 
+  | 'khieu_nai_bao_hanh' 
+  | 'nghiep_vu_khac';
+
+export interface AIDecisionRequest {
+  id: string;
+  code: string; // VD: DEC-1234
+  customerName: string;
+  phone: string;
+  module: 'farm' | 'restaurant' | 'wedding' | 'general';
+  decisionType: AIDecisionType;
+  title: string;
+  summary: string;
+  customerMessage: string;
+  estimatedValue?: number;
+  status: 'pending' | 'approved' | 'rejected' | 'contacted';
+  createdAt: string;
+  adminNote?: string;
+  resolvedAt?: string;
+}
+
 

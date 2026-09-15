@@ -382,6 +382,288 @@ export async function generateQRCodeDataUrl(
   }
 }
 
+export interface LabeledQROptions {
+  type: QrTargetType;
+  title: string;
+  badge: string;
+  badgeColor?: string;
+  subtitle?: string;
+  extraDetails?: string;
+  idLabel?: string;
+  url?: string;
+  farmName?: string;
+  subFarmName?: string;
+  hotline?: string;
+  copyrightText?: string;
+  instructionText?: string;
+}
+
+/**
+ * Sinh mã QR Code ĐÃ CÓ TÊN & THÔNG TIN ĐẦY ĐỦ (Labeled QR Tag/Card).
+ * Tạo một thẻ ảnh PNG sắc nét (800x1100 px, 300 DPI) gồm:
+ * - Header thương hiệu: Phân biệt rõ Hệ Thống Dịch Vụ Ngọc Nhi (3 phân hệ) và Trại Dúi KaKa
+ * - Huy hiệu phân loại (QR Ô Chuồng, QR Dãy, QR Phân Khu, QR Tổng Hệ Thống)
+ * - TÊN QR NỔI BẬT (In hoa đậm nét, cỡ chữ lớn)
+ * - Thông tin vị trí & trạng thái chi tiết
+ * - Khối mã QR Code thực tế (Sửa lỗi mức H 30%, chống mờ bẩn)
+ * - Hướng dẫn quét camera & Mã ID vật lý cố định
+ * 
+ * Giúp người dùng in ra decal dán chuồng có thể phân biệt chính xác từng loại QR.
+ */
+export async function generateLabeledQRCodeDataUrl(
+  text: string,
+  options: LabeledQROptions
+): Promise<{ labeledDataUrl: string; rawQrDataUrl: string }> {
+  // 1. Sinh mã QR raw độ phân giải cao
+  const rawQrDataUrl = await generateQRCodeDataUrl(text, {
+    width: 600,
+    margin: 2,
+    errorCorrectionLevel: 'H'
+  });
+
+  // Nếu môi trường không có document/canvas (SSR), trả về raw
+  if (typeof document === 'undefined') {
+    return { labeledDataUrl: rawQrDataUrl, rawQrDataUrl };
+  }
+
+  try {
+    const canvas = document.createElement('canvas');
+    const W = 800;
+    const H = 1100;
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return { labeledDataUrl: rawQrDataUrl, rawQrDataUrl };
+    }
+
+    const isSystem = options.type === 'system';
+
+    // Helper vẽ hình chữ nhật bo góc
+    const drawRoundedRect = (
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      radius: number,
+      fill?: string,
+      stroke?: string,
+      lineWidth: number = 1
+    ) => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+      if (fill) {
+        ctx.fillStyle = fill;
+        ctx.fill();
+      }
+      if (stroke) {
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = lineWidth;
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+
+    // 1. Nền trắng tinh khiết
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, W, H);
+
+    // 2. Viền ngoài thẻ tem dán (Khung decal chuyên nghiệp)
+    drawRoundedRect(24, 24, W - 48, H - 48, 28, undefined, '#0f172a', 4);
+
+    // Đường viền phụ mỏng bên trong
+    drawRoundedRect(34, 34, W - 68, H - 68, 20, undefined, '#e2e8f0', 1.5);
+
+    // 3. HEADER THƯƠNG HIỆU
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const brandMain = (options.farmName || (isSystem ? 'HỆ THỐNG DỊCH VỤ NGỌC NHI' : 'TRẠI DÚI KAKA • PHAN DŨNG')).toUpperCase();
+    ctx.font = 'bold 20px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#1e293b';
+    ctx.fillText(brandMain, W / 2, 58);
+
+    const defaultSub = isSystem 
+      ? 'Chuỗi dịch vụ đa ngành hàng đầu tại KP 9, phường Lộc Ninh, TP. Đồng Nai\nGiao thoa hoàn hảo giữa ẩm thực đặc sản cao cấp, dịch vụ tiệc cưới và Trang trại dúi hiện đại'
+      : 'HỆ THỐNG DỊCH VỤ NGỌC NHI • KP 9, PHƯỜNG LỘC NINH, TP. ĐỒNG NAI';
+    const rawBrandSub = options.subFarmName || defaultSub;
+
+    const subLines = rawBrandSub.split('\n').map(s => s.trim()).filter(Boolean);
+    if (subLines.length <= 1) {
+      ctx.font = '600 13px system-ui, -apple-system, sans-serif';
+      ctx.fillStyle = '#64748b';
+      ctx.fillText(subLines[0] || '', W / 2, 85);
+    } else {
+      ctx.font = '600 11.5px system-ui, -apple-system, sans-serif';
+      ctx.fillStyle = '#475569';
+      ctx.fillText(subLines[0], W / 2, 79);
+      ctx.font = '500 11px system-ui, -apple-system, sans-serif';
+      ctx.fillStyle = '#64748b';
+      ctx.fillText(subLines[1], W / 2, 95);
+    }
+
+    // Đường kẻ phân cách header
+    ctx.beginPath();
+    ctx.moveTo(60, 110);
+    ctx.lineTo(W - 60, 110);
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // 4. HUY HIỆU PHÂN LOẠI QR (Type Badge)
+    const badgeColor = options.badgeColor || (
+      options.type === 'system' ? '#0f172a' :
+      options.type === 'area' ? '#047857' :
+      options.type === 'row' ? '#1d4ed8' : '#be123c'
+    );
+
+    ctx.font = 'bold 16px system-ui, -apple-system, sans-serif';
+    const badgeText = options.badge.toUpperCase();
+    const badgeWidth = Math.max(ctx.measureText(badgeText).width + 36, 260);
+    const badgeHeight = 36;
+    const badgeX = (W - badgeWidth) / 2;
+    const badgeY = 124;
+
+    drawRoundedRect(badgeX, badgeY, badgeWidth, badgeHeight, 18, badgeColor);
+
+    ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(badgeText, W / 2, badgeY + badgeHeight / 2);
+
+    // 5. TÊN QR CODE LỚN & NỔI BẬT (Main Title)
+    let titleFontSize = 38;
+    ctx.font = `bold ${titleFontSize}px system-ui, -apple-system, sans-serif`;
+    let titleWidth = ctx.measureText(options.title).width;
+    while (titleWidth > W - 140 && titleFontSize > 22) {
+      titleFontSize -= 2;
+      ctx.font = `bold ${titleFontSize}px system-ui, -apple-system, sans-serif`;
+      titleWidth = ctx.measureText(options.title).width;
+    }
+    ctx.fillStyle = '#0f172a';
+    ctx.fillText(options.title, W / 2, 195);
+
+    // 6. DÒNG VỊ TRÍ / PHỤ ĐỀ (Subtitle)
+    if (options.subtitle) {
+      let subFontSize = 18;
+      ctx.font = `600 ${subFontSize}px system-ui, -apple-system, sans-serif`;
+      let subWidth = ctx.measureText(options.subtitle).width;
+      while (subWidth > W - 140 && subFontSize > 14) {
+        subFontSize -= 1;
+        ctx.font = `600 ${subFontSize}px system-ui, -apple-system, sans-serif`;
+        subWidth = ctx.measureText(options.subtitle).width;
+      }
+      ctx.fillStyle = '#334155';
+      ctx.fillText(options.subtitle, W / 2, options.extraDetails ? 236 : 246);
+    }
+
+    // 7. DÒNG THÔNG TIN BỔ SUNG / TRẠNG THÁI (Extra Details)
+    // Nếu nội dung đã xuất hiện ở phần trên (Header) thì bỏ qua để tránh trùng lặp
+    const trimmedExtra = (options.extraDetails || '').trim();
+    const isDuplicateOfHeader = Boolean(trimmedExtra && (
+      rawBrandSub.toLowerCase().includes(trimmedExtra.toLowerCase().slice(0, 20)) ||
+      (options.subtitle && options.subtitle.toLowerCase().includes(trimmedExtra.toLowerCase().slice(0, 20)))
+    ));
+
+    if (trimmedExtra && !isDuplicateOfHeader) {
+      ctx.font = '500 15px system-ui, -apple-system, sans-serif';
+      ctx.fillStyle = '#64748b';
+      ctx.fillText(trimmedExtra, W / 2, 268);
+    }
+
+    // 8. ĐƯỜNG PHÂN CÁCH TRƯỚC MÃ QR
+    ctx.beginPath();
+    ctx.moveTo(80, 288);
+    ctx.lineTo(W - 80, 288);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // 9. VẼ KHUNG & ẢNH MÃ QR CODE
+    const qrSize = 470;
+    const qrX = (W - qrSize) / 2;
+    const qrY = 305;
+
+    // Khung viền hộp QR
+    drawRoundedRect(qrX - 12, qrY - 12, qrSize + 24, qrSize + 24, 20, '#ffffff', '#cbd5e1', 2);
+
+    // Tải ảnh QR vào canvas
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = (e) => reject(e);
+      img.src = rawQrDataUrl;
+    });
+
+    ctx.drawImage(img, qrX, qrY, qrSize, qrSize);
+
+    // Logo / Nhãn nhỏ thương hiệu góc dưới QR
+    const brandTagW = isSystem ? 96 : 86;
+    const brandTagH = 22;
+    drawRoundedRect(qrX + qrSize - brandTagW - 8, qrY + qrSize - brandTagH - 8, brandTagW, brandTagH, 6, '#0f172a');
+    ctx.font = 'bold 11px monospace';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(isSystem ? 'NGỌC NHI' : 'KAKA DÚI', qrX + qrSize - brandTagW / 2 - 8, qrY + qrSize - brandTagH / 2 - 8);
+
+    // 10. HƯỚNG DẪN QUÉT BẰNG CAMERA / ZALO
+    ctx.font = 'bold 17px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#0f172a';
+    ctx.fillText(options.instructionText || '📱 Quét bằng Camera điện thoại hoặc Zalo để mở hồ sơ', W / 2, 840);
+
+    // 11. DÒNG LIÊN HỆ & HOTLINE KỸ THUẬT
+    const contactText = options.hotline || (isSystem
+      ? 'Hotline: 0967.823.801 - 0969.310.601 • Hệ Thống Dịch Vụ Ngọc Nhi'
+      : 'Hotline Kỹ Thuật: 0969.310.601 • Trại Dúi KaKa (Phan Dũng)');
+    ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#334155';
+    ctx.fillText(contactText, W / 2, 882);
+
+    // 12. DÒNG CHỈ DẪN CẮT TEM DECAL (Dashed Cut Guide)
+    ctx.save();
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(50, 930);
+    ctx.lineTo(W - 50, 930);
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.font = 'italic 13px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(
+      isSystem 
+        ? '✂ Tem quét Cổng Hệ Thống Ngọc Nhi • 3 Phân hệ: Trại Dúi - Quán Ăn - Tiệc Cưới'
+        : '✂ Tem dán chuồng trại tiêu chuẩn • In decal nhựa hoặc giấy ép plastic chống nước', 
+      W / 2, 
+      958
+    );
+
+    const copyright = options.copyrightText || (isSystem
+      ? 'Bản quyền Hệ Thống Dịch Vụ Ngọc Nhi (3 Phân Hệ Thống Nhất)'
+      : 'Bản quyền Trại Dúi KaKa - Thuộc Hệ Thống Dịch Vụ Ngọc Nhi');
+    ctx.font = '11.5px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText(`Ngày tạo: ${new Date().toLocaleDateString('vi-VN')} • ${copyright}`, W / 2, 995);
+
+    const labeledDataUrl = canvas.toDataURL('image/png');
+    return { labeledDataUrl, rawQrDataUrl };
+  } catch (err) {
+    console.error('Lỗi khi vẽ thẻ QR có tên:', err);
+    return { labeledDataUrl: rawQrDataUrl, rawQrDataUrl };
+  }
+}
+
+
 /**
  * Migration an toàn dữ liệu:
  * Gán `physicalId` cố định cho từng Khu, Dãy, Ô và đăng ký đầy đủ vào Physical Registry.
